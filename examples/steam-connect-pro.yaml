@@ -1,0 +1,62 @@
+# Full check of Steam Connect Pro: key rendering, artwork compatibility, the property
+# inspector's dependent fields, and whether polling actions release their timers.
+#
+#   sdtest run examples/steam-connect-pro.yaml
+name: Steam Connect Pro smoke
+plugin: ~/Code/plugin-steam-connect-pro
+device: stream-deck
+
+# Credentials the plugin needs before it will show its Action tab.
+globalSettings:
+  apiKey: TEST_KEY
+  steamId: "76561190000000000"
+
+steps:
+  - name: Shipped artwork is Stream Deck compatible
+    lintSvg: ~/Code/plugin-steam-connect-pro/com.chektek.steam-connect-pro.sdPlugin/imgs
+
+  - name: Place the Status key
+    add: com.chektek.steam-connect-pro.status
+    as: status
+    settings:
+      mode: set
+      status: online
+    expect:
+      key: status
+      visible: true
+      state: 0
+      imageSource: manifest
+
+  - name: Render the Status key
+    screenshot: status
+    shotName: status-key
+
+  - name: Property inspector loads and connects
+    piOpen: status
+
+  - name: Switching to Toggle mode saves and reveals the paired dropdowns
+    piSet: mode
+    value: toggle
+    expect:
+      settingsOf: status
+      settingsContain:
+        mode: toggle
+
+  - name: Capture the property inspector
+    piScreenshot: status-pi
+
+  - piClose: true
+
+  - name: Remove the key
+    remove: status
+
+  - name: News releases its polling timer between appear and disappear
+    checkLifecycle: com.chektek.steam-connect-pro.news
+    cycles: 8
+    interact: none
+    expectVerdict: pass
+
+  - name: No protocol violations across the run
+    expect:
+      violationKinds: [state-out-of-range, unknown-command, bad-frame, svg-tiny]
+      maxViolations: 0

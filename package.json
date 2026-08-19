@@ -1,0 +1,38 @@
+{
+    "name": "@chektek/streamdeck-harness",
+    "version": "0.1.0",
+    "private": true,
+    "description": "Headless test harness for Stream Deck plugins.",
+    "license": "MIT",
+    "type": "module",
+    "bin": {
+        "sdtest": "dist/cli/main.js"
+    },
+    "files": [
+        "dist"
+    ],
+    "scripts": {
+        "build": "tsc -p tsconfig.json",
+        "watch": "tsc -p tsconfig.json --watch",
+        "lint": "eslint --max-warnings 0",
+        "lint:fix": "eslint . --fix && prettier . --write",
+        "browser": "playwright install chromium"
+    },
+    "packageManager": "pnpm@11.9.0",
+    "prettier": "@elgato/prettier-config",
+    "dependencies": {
+        "playwright": "^1.49.0",
+        "sax": "^1.4.1",
+        "ws": "^8.18.0",
+        "yaml": "^2.6.0"
+    },
+    "devDependencies": {
+        "@elgato/eslint-config": "^0.3.2",
+        "@elgato/prettier-config": "^0.3.3",
+        "@tsconfig/node20": "^20.1.4",
+        "@types/node": "~20.15.0",
+        "@types/sax": "^1.2.7",
+        "@types/ws": "^8.5.13",
+        "typescript": "^5.7.0"
+    }
+}

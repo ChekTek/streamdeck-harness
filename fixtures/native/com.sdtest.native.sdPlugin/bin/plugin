@@ -1,0 +1,37 @@
+#!/usr/bin/env node
+/**
+ * Native-path fixture: a directly executed binary rather than a `Nodejs` plugin.
+ *
+ * The harness spawns this file itself, with no `--inspect` and no debugger attached, so it
+ * stands in for a Rust or C++ plugin as far as the harness is concerned. A real Rust plugin
+ * built from ~/Code/streamdeck-rs behaves identically here.
+ */
+const args = process.argv.slice(2);
+const arg = (name) => {
+	const index = args.indexOf(name);
+	return index >= 0 ? args[index + 1] : undefined;
+};
+
+const socket = new WebSocket(`ws://127.0.0.1:${arg("-port")}`);
+const counts = new Map();
+
+socket.addEventListener("open", () => {
+	socket.send(JSON.stringify({ event: arg("-registerEvent"), uuid: arg("-pluginUUID") }));
+});
+
+socket.addEventListener("message", (message) => {
+	const { event, action, context } = JSON.parse(message.data);
+	const send = (payload) => socket.send(JSON.stringify(payload));
+
+	if (event === "willAppear") {
+		counts.set(context, 0);
+		send({ event: "setTitle", context, payload: { title: "0" } });
+		if (action === "com.sdtest.native.chatty-leak") {
+			setInterval(() => send({ event: "setTitle", context, payload: { title: String(Date.now()) } }), 50);
+		}
+	} else if (event === "keyDown") {
+		const next = (counts.get(context) ?? 0) + 1;
+		counts.set(context, next);
+		send({ event: "setTitle", context, payload: { title: String(next) } });
+	}
+});
