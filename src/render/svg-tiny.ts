@@ -1,5 +1,7 @@
 import sax from "sax";
 
+import { errorMessage } from "../host/protocol.js";
+
 /**
  * SVG Tiny 1.2 / Stream Deck renderer compatibility linter.
  *
@@ -84,7 +86,7 @@ const TINY_ELEMENTS = new Set([
 ]);
 
 /** Elements outside Tiny 1.2 that Stream Deck drops outright, with the usual workaround. */
-const UNSUPPORTED_ELEMENTS: Record<string, string> = {
+const UNSUPPORTED_ELEMENTS = {
 	filter:
 		"Draw the effect explicitly -- e.g. a drop shadow becomes a duplicated shape offset by a few units at a lower fill-opacity.",
 	mask: "Use a solid shape in the background colour, or split the artwork into non-overlapping paths.",
@@ -100,13 +102,10 @@ const UNSUPPORTED_ELEMENTS: Record<string, string> = {
 	glyphRef: "Convert the text to paths.",
 	view: "Remove it; Stream Deck renders the root viewBox only.",
 	cursor: "Remove it; there is no pointer on a Stream Deck key.",
-};
+} as const;
 
 /** Attributes Stream Deck ignores or cannot honour, with what to do instead. */
-const UNSUPPORTED_ATTRIBUTES: Record<
-	string,
-	{ severity: FindingSeverity; source: "renderer" | "tiny12"; fix: string }
-> = {
+const UNSUPPORTED_ATTRIBUTES = {
 	filter: { severity: "error", source: "tiny12", fix: "Draw the effect explicitly instead of referencing a <filter>." },
 	mask: { severity: "error", source: "tiny12", fix: "Remove the mask reference and trim the geometry instead." },
 	"clip-path": {
@@ -138,7 +137,7 @@ const UNSUPPORTED_ATTRIBUTES: Record<
 		source: "tiny12",
 		fix: "Ignored by Stream Deck -- set the y coordinate to the baseline you want.",
 	},
-};
+} as const;
 
 /**
  * `rgba()`, `hsla()`, the slash-alpha form, and 4/8-digit hex all encode alpha in the colour,
@@ -176,7 +175,7 @@ export function lintSvg(source: string, file = "<inline>"): LintResult {
 	parser.onopentag = (node): void => {
 		const name = node.name;
 
-		const unsupported = UNSUPPORTED_ELEMENTS[name];
+		const unsupported = unsupportedElement(name);
 		if (unsupported !== undefined) {
 			add({
 				severity: "error",
@@ -225,7 +224,7 @@ export function lintSvg(source: string, file = "<inline>"): LintResult {
 			}
 		}
 
-		checkAttributes(name, node.attributes as Record<string, string>, add);
+		checkAttributes(name, stringAttributes(node.attributes), add);
 
 		if (name === "text" && node.attributes["font-family"] === undefined) {
 			add({
@@ -256,7 +255,7 @@ export function lintSvg(source: string, file = "<inline>"): LintResult {
 			severity: "error",
 			source: "parse",
 			rule: "parse/failed",
-			message: (cause as Error).message.split("\n")[0] ?? "could not parse",
+			message: errorMessage(cause).split("\n")[0] ?? "could not parse",
 			line: parser.line + 1,
 			column: parser.column + 1,
 		});
@@ -281,13 +280,50 @@ export function lintSvg(source: string, file = "<inline>"): LintResult {
 	};
 }
 
+function unsupportedElement(name: string): string | undefined {
+	for (const [element, fix] of Object.entries(UNSUPPORTED_ELEMENTS)) {
+		if (element === name) {
+			return fix;
+		}
+	}
+	return undefined;
+}
+
+type AttributeRule = {
+	severity: FindingSeverity;
+	source: "renderer" | "tiny12";
+	fix: string;
+};
+
+function unsupportedAttribute(name: string): AttributeRule | undefined {
+	for (const [attribute, rule] of Object.entries(UNSUPPORTED_ATTRIBUTES)) {
+		if (attribute === name) {
+			return rule;
+		}
+	}
+	return undefined;
+}
+
+function isAttributeString(value: string | { value: string }): value is string {
+	return value === `${value}`;
+}
+
+// eslint-disable-next-line @typescript-eslint/explicit-function-return-type -- return is a string-attribute accumulator
+function stringAttributes(attributes: { [name: string]: string | { value: string } }) {
+	const result: { [name: string]: string } = {};
+	for (const [name, value] of Object.entries(attributes)) {
+		result[name] = isAttributeString(value) ? value : value.value;
+	}
+	return result;
+}
+
 function checkAttributes(
 	element: string,
-	attributes: Record<string, string>,
+	attributes: { [name: string]: string },
 	add: (finding: Omit<Finding, "column" | "line">) => void,
 ): void {
 	for (const [name, value] of Object.entries(attributes)) {
-		const rule = UNSUPPORTED_ATTRIBUTES[name];
+		const rule = unsupportedAttribute(name);
 		if (rule !== undefined) {
 			add({
 				severity: rule.severity,
@@ -357,7 +393,7 @@ function checkStyleDeclarations(style: string, add: (finding: Omit<Finding, "col
 		const property = declaration.slice(0, separator).trim();
 		const value = declaration.slice(separator + 1).trim();
 
-		const rule = UNSUPPORTED_ATTRIBUTES[property];
+		const rule = unsupportedAttribute(property);
 		if (rule !== undefined) {
 			add({
 				severity: rule.severity,
@@ -401,7 +437,12 @@ function indexLines(source: string): number[] {
 	return starts;
 }
 
-function offsetToPosition(lineStarts: number[], offset: number): { line: number; column: number } {
+type SourcePosition = {
+	line: number;
+	column: number;
+};
+
+function offsetToPosition(lineStarts: number[], offset: number): SourcePosition {
 	let low = 0;
 	let high = lineStarts.length - 1;
 	while (low < high) {

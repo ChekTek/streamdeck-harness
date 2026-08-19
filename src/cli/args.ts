@@ -1,3 +1,5 @@
+import { parseJsonObject, type JsonObject } from "../host/protocol.js";
+
 export type Args = {
 	session: string;
 	verb: string;
@@ -6,6 +8,14 @@ export type Args = {
 };
 
 const DEFAULT_SESSION = "default";
+
+function isFlagString(value: boolean | string | undefined): value is string {
+	return typeof value === "string";
+}
+
+function isFlagBoolean(value: boolean | string | undefined): value is boolean {
+	return typeof value === "boolean";
+}
 
 /**
  * Minimal parser for `sdtest -s=<session> <verb> [positional] [--flag value] [--bool]`.
@@ -56,7 +66,7 @@ export function parseArgs(argv: string[]): Args {
 
 export function flagString(args: Args, name: string): string | undefined {
 	const value = args.flags.get(name);
-	return typeof value === "string" ? value : undefined;
+	return isFlagString(value) ? value : undefined;
 }
 
 export function flagNumber(args: Args, name: string): number | undefined {
@@ -76,7 +86,7 @@ export function flagBool(args: Args, name: string): boolean | undefined {
 	if (value === undefined) {
 		return undefined;
 	}
-	if (typeof value === "boolean") {
+	if (isFlagBoolean(value)) {
 		return value;
 	}
 	return value !== "false" && value !== "0";
@@ -91,18 +101,14 @@ export function flagList(args: Args, name: string): string[] | undefined {
 }
 
 /** Parses a JSON flag, accepting `@path` to read from a file. */
-export function flagJson(args: Args, name: string): Record<string, unknown> | undefined {
+export function flagJson(args: Args, name: string): JsonObject | undefined {
 	const value = flagString(args, name);
 	if (value === undefined) {
 		return undefined;
 	}
 	try {
-		const parsed: unknown = JSON.parse(value);
-		if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
-			throw new Error("expected a JSON object");
-		}
-		return parsed as Record<string, unknown>;
+		return parseJsonObject(value, `--${name}`);
 	} catch (cause) {
-		throw new Error(`--${name} is not a JSON object: ${(cause as Error).message}`);
+		throw new Error(`--${name} is not a JSON object: ${cause instanceof Error ? cause.message : String(cause)}`);
 	}
 }

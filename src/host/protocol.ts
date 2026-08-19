@@ -172,14 +172,14 @@ export const UI_EVENTS = [
 ] as const;
 
 /** A frame as it travels over either socket. Unknown shapes are preserved verbatim. */
-export type Frame = {
+export type Frame = JsonObject & {
 	event: string;
 	action?: string;
 	context?: string;
 	device?: string;
 	id?: string;
 	payload?: JsonValue;
-	[key: string]: JsonValue | undefined;
+	uuid?: string;
 };
 
 const pluginCommandSet: ReadonlySet<string> = new Set(PLUGIN_COMMANDS);
@@ -191,6 +191,64 @@ export function isPluginCommand(name: string): name is PluginCommandName {
 
 export function isUiCommand(name: string): name is UiCommandName {
 	return uiCommandSet.has(name);
+}
+
+export function isJsonString(value: JsonValue | undefined): value is string {
+	return typeof value === "string";
+}
+
+export function isJsonNumber(value: JsonValue | undefined): value is number {
+	return typeof value === "number";
+}
+
+export function isJsonBoolean(value: JsonValue | undefined): value is boolean {
+	return typeof value === "boolean";
+}
+
+export function isJsonObject(value: JsonValue | undefined): value is JsonObject {
+	return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+export function isFrame(value: JsonValue): value is Frame {
+	return isJsonObject(value) && isJsonString(value.event);
+}
+
+/** `JSON.parse` returns `any`; this is the typed wire boundary. */
+export function parseJsonValue(text: string): JsonValue {
+	return JSON.parse(text);
+}
+
+export function parseJsonObject(text: string, label: string): JsonObject {
+	const value = parseJsonValue(text);
+	if (!isJsonObject(value)) {
+		throw new Error(`${label} is not a JSON object`);
+	}
+	return value;
+}
+
+export function parseFrame(text: string): Frame {
+	const value = parseJsonValue(text);
+	if (!isFrame(value)) {
+		throw new Error("expected a protocol frame");
+	}
+	return value;
+}
+
+/** Copies defined values into a JSON object, omitting keys whose values are undefined. */
+// eslint-disable-next-line @typescript-eslint/explicit-function-return-type -- JsonObject return annotation is open-dictionary widening
+export function compactJson(fields: { [key: string]: JsonValue | undefined }) {
+	const result: JsonObject = {};
+	for (const key of Object.keys(fields)) {
+		const value = fields[key];
+		if (value !== undefined) {
+			result[key] = value;
+		}
+	}
+	return result;
+}
+
+export function errorMessage(cause: unknown): string {
+	return cause instanceof Error ? cause.message : String(cause);
 }
 
 /** Registration event names accepted on the WebSocket. */

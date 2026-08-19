@@ -2,9 +2,19 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { WebSocket } from "ws";
 
+import {
+	compactJson,
+	isJsonNumber,
+	isJsonObject,
+	isJsonString,
+	type JsonObject,
+	type JsonValue,
+	parseJsonValue,
+} from "../host/protocol.js";
+
 const execFileAsync = promisify(execFile);
 
-type Pending = { resolve: (value: unknown) => void; reject: (reason: Error) => void };
+type Pending = { resolve: (value: JsonValue) => void; reject: (reason: Error) => void };
 
 export type MemoryUsage = {
 	rss: number;
@@ -30,19 +40,24 @@ export class InspectorClient {
 	private constructor(socket: WebSocket) {
 		this.#socket = socket;
 		socket.on("message", (raw) => {
-			const message = JSON.parse(String(raw)) as {
-				id?: number;
-				method?: string;
-				params?: unknown;
-				result?: unknown;
-				error?: { message: string };
-			};
-
-			if (message.method === "HeapProfiler.addHeapSnapshotChunk") {
-				this.#snapshotChunks.push((message.params as { chunk: string }).chunk);
+			let message: JsonValue;
+			try {
+				message = parseJsonValue(String(raw));
+			} catch {
 				return;
 			}
-			if (message.id === undefined) {
+			if (!isJsonObject(message)) {
+				return;
+			}
+
+			if (message.method === "HeapProfiler.addHeapSnapshotChunk") {
+				const params = message.params;
+				if (isJsonObject(params) && isJsonString(params.chunk)) {
+					this.#snapshotChunks.push(params.chunk);
+				}
+				return;
+			}
+			if (!isJsonNumber(message.id)) {
 				return;
 			}
 
@@ -51,10 +66,10 @@ export class InspectorClient {
 				return;
 			}
 			this.#pending.delete(message.id);
-			if (message.error === undefined) {
-				pending.resolve(message.result);
-			} else {
+			if (isJsonObject(message.error) && isJsonString(message.error.message)) {
 				pending.reject(new Error(message.error.message));
+			} else {
+				pending.resolve(message.result ?? null);
 			}
 		});
 	}
@@ -85,19 +100,26 @@ export class InspectorClient {
 	 * Counts the process's active libuv handles and requests by type. A `Timeout` count that
 	 * grows once per appear/disappear cycle is an uncleared `setInterval`, named outright.
 	 */
-	public async activeResources(): Promise<Record<string, number>> {
-		const result = await this.send<{ result: { value?: string[] }; exceptionDetails?: unknown }>("Runtime.evaluate", {
-			expression: "typeof process.getActiveResourcesInfo === 'function' ? process.getActiveResourcesInfo() : null",
-			returnByValue: true,
-			awaitPromise: false,
-		});
+	public async activeResources(): Promise<{ [type: string]: number }> {
+		const result = await this.send(
+			"Runtime.evaluate",
+			compactJson({
+				expression:
+					"typeof process.getActiveResourcesInfo === 'function' ? process.getActiveResourcesInfo() : null",
+				returnByValue: true,
+				awaitPromise: false,
+			}),
+		);
 
-		const values = result.result.value;
+		const values = cdpRemoteValue(result);
 		if (!Array.isArray(values)) {
 			return {};
 		}
-		const counts: Record<string, number> = {};
+		const counts: { [type: string]: number } = {};
 		for (const value of values) {
+			if (!isJsonString(value)) {
+				continue;
+			}
 			counts[value] = (counts[value] ?? 0) + 1;
 		}
 		return counts;
@@ -120,18 +142,40 @@ export class InspectorClient {
 	 * retained avatar or icon would go unnoticed. `process.memoryUsage()` covers both.
 	 */
 	public async memoryUsage(): Promise<MemoryUsage | undefined> {
-		const result = await this.send<{ result: { value?: MemoryUsage } }>("Runtime.evaluate", {
-			expression: "process.memoryUsage()",
-			returnByValue: true,
-			awaitPromise: false,
-		});
-		return result.result.value;
+		const result = await this.send(
+			"Runtime.evaluate",
+			compactJson({
+				expression: "process.memoryUsage()",
+				returnByValue: true,
+				awaitPromise: false,
+			}),
+		);
+		const value = cdpRemoteValue(result);
+		if (!isJsonObject(value)) {
+			return undefined;
+		}
+		if (
+			!isJsonNumber(value.rss) ||
+			!isJsonNumber(value.heapTotal) ||
+			!isJsonNumber(value.heapUsed) ||
+			!isJsonNumber(value.external) ||
+			!isJsonNumber(value.arrayBuffers)
+		) {
+			return undefined;
+		}
+		return {
+			rss: value.rss,
+			heapTotal: value.heapTotal,
+			heapUsed: value.heapUsed,
+			external: value.external,
+			arrayBuffers: value.arrayBuffers,
+		};
 	}
 
-	public async send<T = unknown>(method: string, params: Record<string, unknown> = {}): Promise<T> {
+	public async send(method: string, params: JsonObject = {}): Promise<JsonValue> {
 		const id = this.#nextId++;
-		return new Promise<T>((resolve, reject) => {
-			this.#pending.set(id, { resolve: resolve as (value: unknown) => void, reject });
+		return new Promise((resolve, reject) => {
+			this.#pending.set(id, { resolve, reject });
 			this.#socket.send(JSON.stringify({ id, method, params }));
 		});
 	}
@@ -139,9 +183,19 @@ export class InspectorClient {
 	/** Writes a `.heapsnapshot` openable in Chrome DevTools and returns its raw JSON. */
 	public async takeHeapSnapshot(): Promise<string> {
 		this.#snapshotChunks.length = 0;
-		await this.send("HeapProfiler.takeHeapSnapshot", { reportProgress: false, captureNumericValue: false });
+		await this.send(
+			"HeapProfiler.takeHeapSnapshot",
+			compactJson({ reportProgress: false, captureNumericValue: false }),
+		);
 		return this.#snapshotChunks.join("");
 	}
+}
+
+function cdpRemoteValue(result: JsonValue): JsonValue | undefined {
+	if (!isJsonObject(result) || !isJsonObject(result.result)) {
+		return undefined;
+	}
+	return result.result.value;
 }
 
 /** Resident set size in bytes, for plugins with no inspector to attach to. */
@@ -172,13 +226,21 @@ export function summariseHeapSnapshot(
 	json: string,
 	limit = 15,
 ): Array<{ name: string; count: number; selfSize: number }> {
-	const snapshot = JSON.parse(json) as {
-		snapshot: { meta: { node_fields: string[] } };
-		nodes: number[];
-		strings: string[];
-	};
+	const parsed = parseJsonValue(json);
+	if (!isJsonObject(parsed) || !isJsonObject(parsed.snapshot) || !isJsonObject(parsed.snapshot.meta)) {
+		return [];
+	}
+	const fieldsValue = parsed.snapshot.meta.node_fields;
+	const nodesValue = parsed.nodes;
+	const stringsValue = parsed.strings;
+	if (!Array.isArray(fieldsValue) || !Array.isArray(nodesValue) || !Array.isArray(stringsValue)) {
+		return [];
+	}
 
-	const fields = snapshot.snapshot.meta.node_fields;
+	const fields = fieldsValue.filter((field) => isJsonString(field));
+	const nodes = nodesValue.filter((node) => isJsonNumber(node));
+	const strings = stringsValue.filter((entry) => isJsonString(entry));
+
 	const stride = fields.length;
 	const nameIndex = fields.indexOf("name");
 	const sizeIndex = fields.indexOf("self_size");
@@ -187,11 +249,16 @@ export function summariseHeapSnapshot(
 	}
 
 	const totals = new Map<string, { count: number; selfSize: number }>();
-	for (let offset = 0; offset + stride <= snapshot.nodes.length; offset += stride) {
-		const name = snapshot.strings[snapshot.nodes[offset + nameIndex]!] ?? "(unknown)";
+	for (let offset = 0; offset + stride <= nodes.length; offset += stride) {
+		const nameIndexValue = nodes[offset + nameIndex];
+		const sizeIndexValue = nodes[offset + sizeIndex];
+		if (nameIndexValue === undefined || sizeIndexValue === undefined) {
+			continue;
+		}
+		const name = strings[nameIndexValue] ?? "(unknown)";
 		const entry = totals.get(name) ?? { count: 0, selfSize: 0 };
 		entry.count++;
-		entry.selfSize += snapshot.nodes[offset + sizeIndex] ?? 0;
+		entry.selfSize += sizeIndexValue;
 		totals.set(name, entry);
 	}
 

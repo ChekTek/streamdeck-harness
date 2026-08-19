@@ -14,7 +14,7 @@
     "scripts": {
         "build": "tsc -p tsconfig.json",
         "watch": "tsc -p tsconfig.json --watch",
-        "lint": "eslint --max-warnings 0",
+        "lint": "eslint --max-warnings 0 && oxlint",
         "lint:fix": "eslint . --fix && prettier . --write",
         "browser": "playwright install chromium"
     },
@@ -29,10 +29,12 @@
     "devDependencies": {
         "@elgato/eslint-config": "^0.3.2",
         "@elgato/prettier-config": "^0.3.3",
+        "@oxlint/plugins": "1.79.0",
         "@tsconfig/node20": "^20.1.4",
         "@types/node": "~20.15.0",
         "@types/sax": "^1.2.7",
         "@types/ws": "^8.5.13",
+        "oxlint": "1.79.0",
         "typescript": "^5.7.0"
     }
 }

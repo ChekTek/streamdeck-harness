@@ -55,5 +55,8 @@ export function readPluginLogs(root: string, options: { sinceMs?: number; level?
  * first 15 lines of `*.sdPlugin/logs` for critical errors after a rebuild.
  */
 export function readPluginErrors(root: string, sinceMs?: number, limit = 15): LogLine[] {
-	return readPluginLogs(root, { ...(sinceMs === undefined ? {} : { sinceMs }), level: ["ERROR"] }).slice(0, limit);
+	if (sinceMs === undefined) {
+		return readPluginLogs(root, { level: ["ERROR"] }).slice(0, limit);
+	}
+	return readPluginLogs(root, { sinceMs, level: ["ERROR"] }).slice(0, limit);
 }

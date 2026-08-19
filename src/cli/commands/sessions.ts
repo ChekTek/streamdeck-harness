@@ -3,13 +3,22 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync
 import { fileURLToPath } from "node:url";
 
 import { metaPath, sessionDir, socketPath, stateRoot, validateSessionName } from "../../daemon/paths.js";
+import {
+	compactJson,
+	errorMessage,
+	isJsonNumber,
+	isJsonObject,
+	isJsonString,
+	type JsonObject,
+	parseJsonValue,
+} from "../../host/protocol.js";
 import { type Args, flagBool, flagList, flagNumber, flagString } from "../args.js";
 import { DaemonClient } from "../client.js";
 import { emit, fail, table } from "../output.js";
 
 const DAEMON_ENTRY = fileURLToPath(new URL("../../daemon/main.js", import.meta.url));
 
-export type Meta = { status: string; pid?: number; error?: string; info?: Record<string, unknown> };
+export type Meta = { status: string; pid?: number; error?: string; info?: JsonObject };
 
 function readMeta(session: string): Meta | undefined {
 	const path = metaPath(session);
@@ -17,7 +26,21 @@ function readMeta(session: string): Meta | undefined {
 		return undefined;
 	}
 	try {
-		return JSON.parse(readFileSync(path, "utf8")) as Meta;
+		const value = parseJsonValue(readFileSync(path, "utf8"));
+		if (!isJsonObject(value) || !isJsonString(value.status)) {
+			return undefined;
+		}
+		const meta: Meta = { status: value.status };
+		if (isJsonNumber(value.pid)) {
+			meta.pid = value.pid;
+		}
+		if (isJsonString(value.error)) {
+			meta.error = value.error;
+		}
+		if (isJsonObject(value.info)) {
+			meta.info = value.info;
+		}
+		return meta;
 	} catch {
 		return undefined;
 	}
@@ -63,21 +86,15 @@ export async function launchSession(session: string, options: LaunchOptions): Pr
 	mkdirSync(directory, { recursive: true });
 	rmSync(metaPath(session), { force: true });
 
-	writeFileSync(
-		`${directory}/start.json`,
-		JSON.stringify(
-			{
-				pluginPath: options.pluginPath,
-				devices: options.devices ?? ["stream-deck"],
-				...(options.nodePath === undefined ? {} : { nodePath: options.nodePath }),
-				...(options.inspect === false ? { inspect: false } : {}),
-				...(options.registerTimeoutMs === undefined ? {} : { registerTimeoutMs: options.registerTimeoutMs }),
-				idleTimeoutMs: options.idleTimeoutMs ?? 15 * 60_000,
-			},
-			null,
-			2,
-		),
-	);
+	const start = {
+		pluginPath: options.pluginPath,
+		devices: options.devices ?? ["stream-deck"],
+		idleTimeoutMs: options.idleTimeoutMs ?? 15 * 60_000,
+		nodePath: options.nodePath,
+		inspect: options.inspect === false ? false : undefined,
+		registerTimeoutMs: options.registerTimeoutMs,
+	};
+	writeFileSync(`${directory}/start.json`, JSON.stringify(start, null, 2));
 
 	const child = spawn(process.execPath, [DAEMON_ENTRY, session], { detached: true, stdio: "ignore" });
 	child.unref();
@@ -91,47 +108,61 @@ export async function startCommand(args: Args): Promise<void> {
 		fail("usage: sdtest -s=<session> start <path-to-plugin-or-.sdPlugin>");
 	}
 
+	const options: LaunchOptions = {
+		pluginPath,
+		idleTimeoutMs: (flagNumber(args, "idle-timeout") ?? 15) * 60_000,
+	};
+	const devices = flagList(args, "device");
+	if (devices !== undefined) {
+		options.devices = devices;
+	}
+	const nodePath = flagString(args, "node");
+	if (nodePath !== undefined) {
+		options.nodePath = nodePath;
+	}
+	if (flagBool(args, "inspect") === false) {
+		options.inspect = false;
+	}
+	const registerTimeoutMs = flagNumber(args, "register-timeout");
+	if (registerTimeoutMs !== undefined) {
+		options.registerTimeoutMs = registerTimeoutMs;
+	}
+	const startTimeoutMs = flagNumber(args, "start-timeout");
+	if (startTimeoutMs !== undefined) {
+		options.startTimeoutMs = startTimeoutMs;
+	}
+
 	let meta: Meta;
 	try {
-		meta = await launchSession(args.session, {
-			pluginPath,
-			...(flagList(args, "device") === undefined ? {} : { devices: flagList(args, "device")! }),
-			...(flagString(args, "node") === undefined ? {} : { nodePath: flagString(args, "node")! }),
-			...(flagBool(args, "inspect") === false ? { inspect: false } : {}),
-			...(flagNumber(args, "register-timeout") === undefined
-				? {}
-				: { registerTimeoutMs: flagNumber(args, "register-timeout")! }),
-			idleTimeoutMs: (flagNumber(args, "idle-timeout") ?? 15) * 60_000,
-			...(flagNumber(args, "start-timeout") === undefined
-				? {}
-				: { startTimeoutMs: flagNumber(args, "start-timeout")! }),
-		});
+		meta = await launchSession(args.session, options);
 	} catch (cause) {
-		fail((cause as Error).message);
+		fail(errorMessage(cause));
 	}
 
 	if (meta.status !== "ready") {
 		fail(`session "${args.session}" failed to start:\n${meta.error ?? "unknown error"}`);
 	}
 
-	emit(meta.info ?? {}, (info: Record<string, unknown>) =>
-		[
+	const info = meta.info ?? {};
+	emit(info, (value) => {
+		const row = isJsonObject(value) ? value : {};
+		const actions = Array.isArray(row.actions) ? row.actions : [];
+		return [
 			`session   ${args.session}`,
-			`plugin    ${String(info.plugin)} ${String(info.version)} (${String(info.uuid)})`,
-			`runtime   ${String(info.runtime)}${info.inspector === null ? "" : " + inspector"}`,
-			`pid       ${String(info.pid)}   host port ${String(info.port)}`,
-			`artifacts ${String(info.artifacts)}`,
+			`plugin    ${String(row.plugin)} ${String(row.version)} (${String(row.uuid)})`,
+			`runtime   ${String(row.runtime)}${row.inspector === null || row.inspector === undefined ? "" : " + inspector"}`,
+			`pid       ${String(row.pid)}   host port ${String(row.port)}`,
+			`artifacts ${String(row.artifacts)}`,
 			"",
 			"actions:",
 			table(
-				(info.actions as Array<Record<string, unknown>>).map((action) => [
-					`  ${String(action.uuid)}`,
-					String(action.name),
-					`${String(action.states)} state(s)`,
-				]),
+				actions.map((entry) => {
+					const action = isJsonObject(entry) ? entry : {};
+					return [`  ${String(action.uuid)}`, String(action.name), `${String(action.states)} state(s)`];
+				}),
 			),
-		].join("\n"),
-	);
+		].join("\n");
+	});
 }
 
 async function waitForMeta(session: string, timeoutMs: number): Promise<Meta> {
@@ -175,9 +206,10 @@ export async function closeCommand(args: Args): Promise<void> {
 		closed.push(session);
 	}
 
-	emit({ closed }, ({ closed: names }: { closed: string[] }) =>
-		names.length === 0 ? "no running sessions" : `closed: ${names.join(", ")}`,
-	);
+	emit(compactJson({ closed }), (value) => {
+		const names = isJsonObject(value) && Array.isArray(value.closed) ? value.closed.filter((entry) => isJsonString(entry)) : [];
+		return names.length === 0 ? "no running sessions" : `closed: ${names.join(", ")}`;
+	});
 }
 
 type SessionRow = { session: string; status: string; pid: number | null; plugin: string | null };
@@ -193,22 +225,42 @@ function listSessions(): SessionRow[] {
 			return [];
 		}
 		const alive = isAlive(meta.pid);
+		const plugin = meta.info === undefined || !isJsonString(meta.info.plugin) ? null : meta.info.plugin;
 		return [
 			{
 				session,
 				status: meta.status === "ready" && !alive ? "dead" : meta.status,
 				pid: meta.pid ?? null,
-				plugin: (meta.info?.plugin as string | undefined) ?? null,
+				plugin,
 			},
 		];
 	});
 }
 
 export function listCommand(): void {
-	emit(listSessions(), (rows: SessionRow[]) =>
-		table([
-			["SESSION", "STATUS", "PID", "PLUGIN"],
-			...rows.map((row) => [row.session, row.status, String(row.pid ?? "-"), row.plugin ?? "-"]),
-		]),
+	emit(
+		listSessions().map((row) =>
+			compactJson({
+				session: row.session,
+				status: row.status,
+				pid: row.pid,
+				plugin: row.plugin,
+			}),
+		),
+		(rows) => {
+			const list = Array.isArray(rows) ? rows : [];
+			return table([
+				["SESSION", "STATUS", "PID", "PLUGIN"],
+				...list.map((entry) => {
+					const row = isJsonObject(entry) ? entry : {};
+					return [
+						String(row.session ?? ""),
+						String(row.status ?? ""),
+						String(row.pid ?? "-"),
+						row.plugin === null || row.plugin === undefined ? "-" : String(row.plugin),
+					];
+				}),
+			]);
+		},
 	);
 }

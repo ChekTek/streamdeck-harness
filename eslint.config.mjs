@@ -2,7 +2,12 @@ import { config } from "@elgato/eslint-config";
 
 export default [
 	{
-		ignores: ["dist/**", "node_modules/**", "fixtures/**/bin/**"],
+		ignores: [
+			"dist/**",
+			"node_modules/**",
+			"fixtures/**/bin/**",
+			"tools/oxlint/anti-slop/**",
+		],
 	},
 	...config.strict,
 	{

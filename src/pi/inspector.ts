@@ -2,7 +2,14 @@ import { join } from "node:path";
 import type { Page } from "playwright";
 
 import type { ActionInstance } from "../host/action.js";
-import type { JsonObject, RegistrationInfo } from "../host/protocol.js";
+import {
+	compactJson,
+	errorMessage,
+	isJsonObject,
+	type JsonObject,
+	type JsonValue,
+	type RegistrationInfo,
+} from "../host/protocol.js";
 import type { PluginProject } from "../plugin/manifest.js";
 import { getBrowser } from "../render/chromium.js";
 import { StaticServer } from "./static-server.js";
@@ -63,18 +70,24 @@ export class Inspector {
 		await server.listen();
 		const url = `${server.origin}/${relative.replace(/^\.?\//, "")}`;
 
-		const actionInfo = {
+		const payload = compactJson({
+			controller: instance.controller,
+			isInMultiAction: instance.isInMultiAction,
+			settings: options.settings,
+			state: instance.state,
+		});
+		if (instance.coordinates !== undefined) {
+			payload.coordinates = compactJson({
+				column: instance.coordinates.column,
+				row: instance.coordinates.row,
+			});
+		}
+		const actionInfo = compactJson({
 			action: instance.uuid,
 			context: instance.context,
 			device: instance.device.id,
-			payload: {
-				controller: instance.controller,
-				...(instance.coordinates === undefined ? {} : { coordinates: instance.coordinates }),
-				isInMultiAction: instance.isInMultiAction,
-				settings: options.settings,
-				state: instance.state,
-			},
-		};
+			payload,
+		});
 
 		const browser = await getBrowser();
 		const page = await browser.newPage({
@@ -93,7 +106,7 @@ export class Inspector {
 			await page.goto(url, { waitUntil: "domcontentloaded" });
 		} catch (cause) {
 			await inspector.close();
-			throw new Error(`could not load ${url}: ${(cause as Error).message}`);
+			throw new Error(`could not load ${url}: ${errorMessage(cause)}`);
 		}
 		return inspector;
 	}
@@ -116,24 +129,37 @@ export class Inspector {
 	 * visibility each currently has. Components live in shadow roots, so this reads them from
 	 * inside the page rather than through the accessibility tree.
 	 */
-	public async fields(): Promise<Array<Record<string, unknown>>> {
-		return this.#page.evaluate(() => {
+	public async fields(): Promise<JsonObject[]> {
+		const rows = await this.#page.evaluate(() => {
+			type SdpiHost = HTMLElement & { disabled?: boolean; value?: boolean | number | string | null };
 			return [...document.querySelectorAll("[setting]")].map((element) => {
 				const item = element.closest("sdpi-item");
+				// SAFETY: SDPI custom elements publish `value` and `disabled` on the host; lib.dom does not.
+				const host = element as SdpiHost;
 				return {
 					setting: element.getAttribute("setting"),
 					tag: element.tagName.toLowerCase(),
 					label: item?.getAttribute("label") ?? null,
 					title: item?.getAttribute("title") ?? null,
 					global: element.getAttribute("global") === "true" || element.hasAttribute("global"),
-					value: (element as unknown as { value?: unknown }).value ?? null,
-					// Dependent fields are hidden by their sdpi-item wrapper, so the check has to
-					// walk ancestors -- checkVisibility does, offsetParent alone does not.
-					visible: (element as HTMLElement).checkVisibility({ checkOpacity: true, checkVisibilityCSS: true }),
-					disabled: (element as unknown as { disabled?: boolean }).disabled ?? false,
+					value: host.value ?? null,
+					visible: host.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true }),
+					disabled: host.disabled ?? false,
 				};
 			});
 		});
+		return rows.map((row) =>
+			compactJson({
+				setting: row.setting,
+				tag: row.tag,
+				label: row.label,
+				title: row.title,
+				global: row.global,
+				value: row.value,
+				visible: row.visible,
+				disabled: row.disabled,
+			}),
+		);
 	}
 
 	public async screenshot(directory: string, stem: string, fullPage = true): Promise<string> {
@@ -153,24 +179,27 @@ export class Inspector {
 	 * custom element's `value` alone would save the setting without running the page's own
 	 * change handlers.
 	 */
-	public async setField(setting: string, value: unknown): Promise<Record<string, unknown>> {
+	public async setField(setting: string, value: JsonValue): Promise<JsonObject> {
 		const result = await this.#page.evaluate(
-			async ({ setting: name, value: next }) => {
-				type Component = HTMLElement & {
-					value?: unknown;
-					updateComplete?: Promise<unknown>;
+			async ({ setting: name, value: next }: PiFieldArg) => {
+				type SdpiHost = HTMLElement & {
+					disabled?: boolean;
 					focusElement?: HTMLElement | { value?: HTMLElement };
+					updateComplete?: Promise<boolean>;
+					value?: boolean | number | string | null;
 				};
 
-				const element = document.querySelector(`[setting="${name}"]`) as Component | null;
-				if (element === null) {
-					const known = [...document.querySelectorAll("[setting]")].map((node) => node.getAttribute("setting"));
+				const node = document.querySelector(`[setting="${name}"]`);
+				if (node === null) {
+					const known = [...document.querySelectorAll("[setting]")].map((candidate) => candidate.getAttribute("setting"));
 					return {
 						ok: false as const,
 						error: `no component with setting="${name}". Present: ${known.join(", ") || "(none)"}`,
 					};
 				}
 
+				// SAFETY: SDPI custom elements publish value/focusElement/updateComplete on the host.
+				const element = node as SdpiHost;
 				await element.updateComplete?.catch(() => undefined);
 
 				const ref = element.focusElement;
@@ -184,8 +213,12 @@ export class Inspector {
 					inner instanceof HTMLTextAreaElement
 				) {
 					inner.value = next === null || next === undefined ? "" : String(next);
-				} else {
+				} else if (next === true || next === false) {
 					element.value = next;
+				} else if (next === null || next === undefined) {
+					element.value = null;
+				} else {
+					element.value = String(next);
 				}
 
 				const fire = (target: EventTarget | undefined): void => {
@@ -196,15 +229,15 @@ export class Inspector {
 				fire(element);
 
 				await element.updateComplete?.catch(() => undefined);
-				return { ok: true as const, value: (element.value ?? null) as unknown };
+				return { ok: true as const, value: element.value ?? null };
 			},
-			{ setting, value },
+			{ setting, value: toPiFieldValue(value) },
 		);
 
 		if (!result.ok) {
 			throw new Error(result.error);
 		}
-		return { setting, value: result.value };
+		return compactJson({ setting, value: result.value });
 	}
 
 	public async snapshot(): Promise<string> {
@@ -214,13 +247,9 @@ export class Inspector {
 	/** Resolves once the page has called `connectElgatoStreamDeckSocket`. */
 	public async waitForConnect(timeoutMs: number): Promise<boolean> {
 		try {
-			await this.#page.waitForFunction(
-				() => (window as unknown as { __sdtestConnected?: boolean }).__sdtestConnected === true,
-				undefined,
-				{
-					timeout: timeoutMs,
-				},
-			);
+			await this.#page.waitForFunction("window.__sdtestConnected === true", undefined, {
+				timeout: timeoutMs,
+			});
 			return true;
 		} catch {
 			return false;
@@ -234,7 +263,7 @@ export class Inspector {
  * harness cannot simply define the global up front, and polling for it races page load.
  * Installing an accessor lets the harness call the implementation the instant it appears.
  */
-function bootstrapScript(hostPort: number, uuid: string, info: RegistrationInfo, actionInfo: unknown): string {
+function bootstrapScript(hostPort: number, uuid: string, info: RegistrationInfo, actionInfo: JsonObject): string {
 	const args = [String(hostPort), uuid, "registerPropertyInspector", JSON.stringify(info), JSON.stringify(actionInfo)];
 
 	return `(() => {
@@ -244,7 +273,7 @@ function bootstrapScript(hostPort: number, uuid: string, info: RegistrationInfo,
   let invoked = false;
 
   const invoke = () => {
-    if (invoked || typeof implementation !== "function") return;
+    if (invoked || implementation == null) return;
     invoked = true;
     try {
       const result = implementation(...args);
@@ -277,4 +306,19 @@ function bootstrapScript(hostPort: number, uuid: string, info: RegistrationInfo,
     document.head?.appendChild(style);
   });
 })();`;
+}
+
+type PiFieldArg = {
+	setting: string;
+	value: boolean | number | string | null;
+};
+
+function toPiFieldValue(value: JsonValue): boolean | number | string | null {
+	if (value === null || value === true || value === false) {
+		return value;
+	}
+	if (Array.isArray(value) || isJsonObject(value)) {
+		return JSON.stringify(value);
+	}
+	return value;
 }

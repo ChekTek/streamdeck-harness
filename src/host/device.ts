@@ -33,7 +33,12 @@ export class Device {
 
 	constructor(profile: DeviceProfileName, id = newIdentifier()) {
 		this.id = id;
-		this.info = structuredClone(DEVICE_PROFILES[profile]) as DeviceInfo;
+		const profileInfo = DEVICE_PROFILES[profile];
+		this.info = {
+			name: profileInfo.name,
+			size: { columns: profileInfo.size.columns, rows: profileInfo.size.rows },
+			type: profileInfo.type,
+		};
 	}
 
 	public get columns(): number {

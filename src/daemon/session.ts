@@ -1,7 +1,7 @@
 import { mkdirSync } from "node:fs";
 
-import { Device, type DeviceProfileName, isDeviceProfileName } from "../host/device.js";
-import type { JsonObject } from "../host/protocol.js";
+import { Device, isDeviceProfileName } from "../host/device.js";
+import { compactJson, errorMessage, type JsonObject } from "../host/protocol.js";
 import { buildRegistrationInfo } from "../host/registration.js";
 import { MockStreamDeck } from "../host/ws-server.js";
 import type { Inspector } from "../pi/inspector.js";
@@ -61,7 +61,7 @@ export class Session {
 			if (!isDeviceProfileName(name)) {
 				throw new Error(`unknown device profile "${name}"`);
 			}
-			return new Device(name as DeviceProfileName);
+			return new Device(name);
 		});
 
 		const artifacts = artifactsDir(options.name);
@@ -83,8 +83,8 @@ export class Session {
 			port,
 			pluginUuid: host.pluginUuid,
 			info: host.info,
-			...(options.nodePath === undefined ? {} : { nodePath: options.nodePath }),
-			...(options.inspect === undefined ? {} : { inspect: options.inspect }),
+			nodePath: options.nodePath,
+			inspect: options.inspect,
 		});
 
 		// A plugin that dies before registering would otherwise hang the handshake wait.
@@ -101,7 +101,7 @@ export class Session {
 		} catch (cause) {
 			const detail = session.failureDetail();
 			await session.close();
-			throw new Error(`${(cause as Error).message}\n${detail}`);
+			throw new Error(`${errorMessage(cause)}\n${detail}`);
 		}
 
 		session.inspectorUrl = await plugin.waitForInspector(2000);
@@ -117,7 +117,7 @@ export class Session {
 	}
 
 	public describe(): JsonObject {
-		return {
+		return compactJson({
 			session: this.name,
 			plugin: this.project.manifest.Name,
 			uuid: this.project.manifest.UUID,
@@ -131,20 +131,24 @@ export class Session {
 			inspector: this.inspectorUrl ?? null,
 			artifacts: this.artifacts,
 			startedAt: new Date(this.startedAt).toISOString(),
-			devices: this.host.devices.map((device) => ({
-				id: device.id,
-				name: device.info.name,
-				columns: device.columns,
-				rows: device.rows,
-			})),
-			actions: this.project.manifest.Actions.map((action) => ({
-				uuid: action.UUID,
-				name: action.Name,
-				controllers: (action.Controllers ?? ["Keypad"]) as unknown as JsonObject[keyof JsonObject],
-				states: action.States?.length ?? 1,
-				propertyInspector: action.PropertyInspectorPath ?? this.project.manifest.PropertyInspectorPath ?? null,
-			})) as unknown as JsonObject[keyof JsonObject],
-		};
+			devices: this.host.devices.map((device) =>
+				compactJson({
+					id: device.id,
+					name: device.info.name,
+					columns: device.columns,
+					rows: device.rows,
+				}),
+			),
+			actions: this.project.manifest.Actions.map((action) =>
+				compactJson({
+					uuid: action.UUID,
+					name: action.Name,
+					controllers: action.Controllers ?? ["Keypad"],
+					states: action.States?.length ?? 1,
+					propertyInspector: action.PropertyInspectorPath ?? this.project.manifest.PropertyInspectorPath ?? null,
+				}),
+			),
+		});
 	}
 
 	/** Diagnostics worth printing when startup fails: process output plus the plugin's own error log. */

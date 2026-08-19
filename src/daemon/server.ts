@@ -1,9 +1,10 @@
 import { existsSync, unlinkSync, writeFileSync } from "node:fs";
 import { createServer, type Server, type Socket } from "node:net";
 
-import { type MethodContext, methods } from "./methods.js";
+import { compactJson, errorMessage, type JsonValue } from "../host/protocol.js";
+import { type MethodContext, methodFor } from "./methods.js";
 import { metaPath, socketPath } from "./paths.js";
-import { readFrames, type RpcRequest, type RpcResponse, writeFrame } from "./rpc.js";
+import { parseRpcRequest, readFrames, writeFrame } from "./rpc.js";
 import type { Session } from "./session.js";
 
 export type DaemonOptions = {
@@ -60,20 +61,27 @@ export class Daemon {
 		socket.on("close", () => this.#connections.delete(socket));
 		socket.on("error", () => socket.destroy());
 		readFrames(socket, (value) => {
-			void this.#dispatch(socket, value as RpcRequest);
+			void this.#dispatch(socket, value);
 		});
 	}
 
-	async #dispatch(socket: Socket, request: RpcRequest): Promise<void> {
+	async #dispatch(socket: Socket, value: JsonValue): Promise<void> {
 		this.#lastRequestAt = Date.now();
+		const request = parseRpcRequest(value);
+		if (request === undefined) {
+			return;
+		}
 
-		const handler = methods[request.method];
+		const handler = methodFor(request.method);
 		if (handler === undefined) {
-			writeFrame(socket, {
-				id: request.id,
-				ok: false,
-				error: { message: `unknown method "${request.method}"` },
-			} satisfies RpcResponse);
+			writeFrame(
+				socket,
+				compactJson({
+					id: request.id,
+					ok: false,
+					error: compactJson({ message: `unknown method "${request.method}"` }),
+				}),
+			);
 			return;
 		}
 
@@ -83,15 +91,14 @@ export class Daemon {
 		};
 
 		try {
-			const result = await handler(context, request.params ?? {});
-			writeFrame(socket, { id: request.id, ok: true, result } satisfies RpcResponse);
+			const result = await handler(context, request.params);
+			writeFrame(socket, compactJson({ id: request.id, ok: true, result }));
 		} catch (cause) {
-			const error = cause as Error;
-			writeFrame(socket, {
-				id: request.id,
-				ok: false,
-				error: { message: error.message, ...(error.stack === undefined ? {} : { stack: error.stack }) },
-			} satisfies RpcResponse);
+			const error = compactJson({ message: errorMessage(cause) });
+			if (cause instanceof Error && cause.stack !== undefined) {
+				error.stack = cause.stack;
+			}
+			writeFrame(socket, compactJson({ id: request.id, ok: false, error }));
 		}
 	}
 
@@ -109,8 +116,6 @@ export class Daemon {
 
 		await this.#session.close();
 
-		// `server.close()` only completes once every connection has gone, and the client that
-		// asked for the shutdown is still holding one. Stop accepting, then drop them.
 		this.#server?.close();
 		for (const connection of this.#connections) {
 			connection.destroy();
@@ -120,7 +125,6 @@ export class Daemon {
 			unlinkSync(this.#address);
 		}
 
-		// Give the response frame a tick to flush before the process disappears.
 		setTimeout(() => process.exit(0), 50);
 	}
 }

@@ -7,17 +7,22 @@ import { lintSvg } from "../render/svg-tiny.js";
 import { ActionInstance } from "./action.js";
 import { type Device, newIdentifier } from "./device.js";
 import {
-	type AppearPayload,
+	compactJson,
 	type Controller,
 	type Coordinates,
 	type Frame,
+	isJsonNumber,
+	isJsonObject,
+	isJsonString,
 	isPluginCommand,
 	isUiCommand,
 	type JsonObject,
 	type JsonValue,
+	parseFrame,
 	REGISTER_PLUGIN,
 	REGISTER_PROPERTY_INSPECTOR,
 	type RegistrationInfo,
+	type Target,
 } from "./protocol.js";
 import { Recorder } from "./recorder.js";
 import { SettingsStore } from "./stores.js";
@@ -149,7 +154,7 @@ export class MockStreamDeck extends EventEmitter {
 			action: instance.uuid,
 			context: instance.context,
 			device: instance.device.id,
-			payload: this.#appearPayload(instance) as unknown as JsonValue,
+			payload: this.#appearPayload(instance),
 		});
 		// The real app emits titleParametersDidChange immediately after willAppear.
 		this.#emitTitleParameters(instance);
@@ -181,7 +186,7 @@ export class MockStreamDeck extends EventEmitter {
 			action: instance.uuid,
 			context: instance.context,
 			device: instance.device.id,
-			payload: this.#appearPayload(instance) as unknown as JsonValue,
+			payload: this.#appearPayload(instance),
 		});
 		instance.disappearedAtSeq = this.recorder.nextSeq;
 	}
@@ -199,28 +204,30 @@ export class MockStreamDeck extends EventEmitter {
 	}
 
 	public keyDown(instance: ActionInstance, userDesiredState?: number): void {
+		const payload = this.#appearPayload(instance);
+		if (userDesiredState !== undefined) {
+			payload.userDesiredState = userDesiredState;
+		}
 		this.#sendToPlugin({
 			event: "keyDown",
 			action: instance.uuid,
 			context: instance.context,
 			device: instance.device.id,
-			payload: {
-				...this.#appearPayload(instance),
-				...(userDesiredState === undefined ? {} : { userDesiredState }),
-			} as unknown as JsonValue,
+			payload,
 		});
 	}
 
 	public keyUp(instance: ActionInstance, userDesiredState?: number): void {
+		const payload = this.#appearPayload(instance);
+		if (userDesiredState !== undefined) {
+			payload.userDesiredState = userDesiredState;
+		}
 		this.#sendToPlugin({
 			event: "keyUp",
 			action: instance.uuid,
 			context: instance.context,
 			device: instance.device.id,
-			payload: {
-				...this.#appearPayload(instance),
-				...(userDesiredState === undefined ? {} : { userDesiredState }),
-			} as unknown as JsonValue,
+			payload,
 		});
 	}
 
@@ -233,7 +240,7 @@ export class MockStreamDeck extends EventEmitter {
 			server.once("error", reject);
 		});
 
-		this.#port = (server.address() as AddressInfo).port;
+		this.#port = tcpPort(server.address());
 		server.on("connection", (socket) => this.#onConnection(socket));
 		return this.#port;
 	}
@@ -298,7 +305,7 @@ export class MockStreamDeck extends EventEmitter {
 		socket.once("message", (raw) => {
 			let frame: Frame;
 			try {
-				frame = JSON.parse(String(raw)) as Frame;
+				frame = parseFrame(String(raw));
 			} catch {
 				this.recorder.violation("bad-registration", `registration frame is not JSON: ${String(raw).slice(0, 200)}`);
 				socket.close();
@@ -341,13 +348,17 @@ export class MockStreamDeck extends EventEmitter {
 			this.#sendToPlugin({
 				event: "deviceDidConnect",
 				device: device.id,
-				deviceInfo: device.info as unknown as JsonValue,
+				deviceInfo: compactJson({
+					name: device.info.name,
+					type: device.info.type,
+					size: compactJson({ columns: device.info.size.columns, rows: device.info.size.rows }),
+				}),
 			});
 		}
 	}
 
 	#attachUi(socket: WebSocket, frame: Frame): void {
-		const context = typeof frame.uuid === "string" ? frame.uuid : "";
+		const context = isJsonString(frame.uuid) ? frame.uuid : "";
 		if (!this.#actions.has(context)) {
 			this.recorder.violation("bad-registration", `property inspector registered for unknown context ${context}`);
 		}
@@ -392,7 +403,7 @@ export class MockStreamDeck extends EventEmitter {
 	#onPluginMessage(raw: string): void {
 		let frame: Frame;
 		try {
-			frame = JSON.parse(raw) as Frame;
+			frame = parseFrame(raw);
 		} catch {
 			this.recorder.violation("bad-frame", `plugin sent non-JSON: ${raw.slice(0, 200)}`);
 			return;
@@ -406,9 +417,9 @@ export class MockStreamDeck extends EventEmitter {
 			return;
 		}
 
-		const context = typeof frame.context === "string" ? frame.context : undefined;
+		const context = isJsonString(frame.context) ? frame.context : undefined;
 		const instance = context === undefined ? undefined : this.#actions.get(context);
-		const payload = (frame.payload ?? {}) as JsonObject;
+		const payload = isJsonObject(frame.payload) ? frame.payload : {};
 
 		// A command naming a context that has already disappeared is the primary
 		// language-agnostic leak signal, so flag it here rather than only in the check.
@@ -424,7 +435,7 @@ export class MockStreamDeck extends EventEmitter {
 				{
 					context,
 					action: instance.uuid,
-					detail: { commandSeq: entry.seq, disappearedAtSeq: instance.disappearedAtSeq },
+					detail: compactJson({ commandSeq: entry.seq, disappearedAtSeq: instance.disappearedAtSeq }),
 				},
 			);
 		}
@@ -453,13 +464,17 @@ export class MockStreamDeck extends EventEmitter {
 					this.#sendToUi(uiContext, globalSettingsFrame(this.settings.getGlobal()));
 				}
 				break;
-			case "getSecrets":
-				this.#sendToPlugin({
+			case "getSecrets": {
+				const secretsFrame: Frame = {
 					event: "didReceiveSecrets",
-					...(frame.id === undefined ? {} : { id: frame.id }),
-					payload: { secrets: this.settings.getSecrets() },
-				});
+					payload: compactJson({ secrets: this.settings.getSecrets() }),
+				};
+				if (frame.id !== undefined) {
+					secretsFrame.id = frame.id;
+				}
+				this.#sendToPlugin(secretsFrame);
 				break;
+			}
 			case "getResources":
 				if (instance !== undefined) {
 					this.#sendToPlugin(this.#settingsFrame("didReceiveResources", instance, frame.id));
@@ -509,8 +524,8 @@ export class MockStreamDeck extends EventEmitter {
 		if (instance === undefined) {
 			return;
 		}
-		const title = typeof payload.title === "string" ? payload.title : "";
-		const state = typeof payload.state === "number" ? payload.state : undefined;
+		const title = isJsonString(payload.title) ? payload.title : "";
+		const state = isJsonNumber(payload.state) ? payload.state : undefined;
 
 		if (state === undefined) {
 			instance.title = title;
@@ -525,9 +540,9 @@ export class MockStreamDeck extends EventEmitter {
 		if (instance === undefined) {
 			return;
 		}
-		const image = typeof payload.image === "string" && payload.image.length > 0 ? payload.image : undefined;
-		const target = (typeof payload.target === "number" ? payload.target : 0) as 0 | 1 | 2;
-		const state = typeof payload.state === "number" ? payload.state : undefined;
+		const image = isJsonString(payload.image) && payload.image.length > 0 ? payload.image : undefined;
+		const target = asTarget(payload.target);
+		const state = isJsonNumber(payload.state) ? payload.state : undefined;
 
 		if (image !== undefined) {
 			this.#lintImagePayload(instance, image);
@@ -578,7 +593,7 @@ export class MockStreamDeck extends EventEmitter {
 			this.recorder.violation("svg-tiny", `${finding.rule}: ${finding.message}`, {
 				context: instance.context,
 				action: instance.uuid,
-				detail: { line: finding.line, column: finding.column, fix: finding.fix },
+				detail: compactJson({ line: finding.line, column: finding.column, fix: finding.fix }),
 			});
 		}
 	}
@@ -587,7 +602,7 @@ export class MockStreamDeck extends EventEmitter {
 		if (instance === undefined) {
 			return;
 		}
-		const state = typeof payload.state === "number" ? payload.state : 0;
+		const state = isJsonNumber(payload.state) ? payload.state : 0;
 		if (state < 0 || state >= instance.stateCount) {
 			this.recorder.violation(
 				"state-out-of-range",
@@ -605,7 +620,7 @@ export class MockStreamDeck extends EventEmitter {
 	#onUiMessage(context: string, raw: string): void {
 		let frame: Frame;
 		try {
-			frame = JSON.parse(raw) as Frame;
+			frame = parseFrame(raw);
 		} catch {
 			this.recorder.violation("bad-frame", `property inspector sent non-JSON: ${raw.slice(0, 200)}`);
 			return;
@@ -620,7 +635,7 @@ export class MockStreamDeck extends EventEmitter {
 		}
 
 		const instance = this.#actions.get(context);
-		const payload = (frame.payload ?? {}) as JsonObject;
+		const payload = isJsonObject(frame.payload) ? frame.payload : {};
 
 		switch (frame.event) {
 			case "getSettings":
@@ -689,54 +704,90 @@ export class MockStreamDeck extends EventEmitter {
 		throw new Error(`${device.info.name} is full (${device.columns}x${device.rows})`);
 	}
 
-	#appearPayload(instance: ActionInstance): AppearPayload {
-		return {
+	#appearPayload(instance: ActionInstance): JsonObject {
+		const payload = compactJson({
 			controller: instance.controller,
-			...(instance.coordinates === undefined ? {} : { coordinates: instance.coordinates }),
 			isInMultiAction: instance.isInMultiAction,
 			resources: this.settings.getResources(instance.context),
 			settings: this.settings.get(instance.context),
-			// Stream Deck omits `state` for single-state actions; matched against a real transcript.
-			...(instance.stateCount > 1 ? { state: instance.state } : {}),
-		};
+		});
+		if (instance.coordinates !== undefined) {
+			payload.coordinates = compactJson({
+				column: instance.coordinates.column,
+				row: instance.coordinates.row,
+			});
+		}
+		if (instance.stateCount > 1) {
+			payload.state = instance.state;
+		}
+		return payload;
 	}
 
 	#settingsFrame(event: "didReceiveResources" | "didReceiveSettings", instance: ActionInstance, id?: string): Frame {
-		return {
+		const frame: Frame = {
 			event,
 			action: instance.uuid,
 			context: instance.context,
 			device: instance.device.id,
-			...(id === undefined ? {} : { id }),
-			payload: this.#appearPayload(instance) as unknown as JsonValue,
+			payload: this.#appearPayload(instance),
 		};
+		if (id !== undefined) {
+			frame.id = id;
+		}
+		return frame;
 	}
 
 	#emitTitleParameters(instance: ActionInstance): void {
 		if (!instance.visible) {
 			return;
 		}
+		const parameters = instance.titleParameters;
+		const payload = this.#appearPayload(instance);
+		payload.state = instance.state;
+		payload.title = instance.effectiveTitle;
+		payload.titleParameters = compactJson({
+			fontFamily: parameters.fontFamily,
+			fontSize: parameters.fontSize,
+			fontStyle: parameters.fontStyle,
+			fontUnderline: parameters.fontUnderline,
+			showTitle: parameters.showTitle,
+			titleAlignment: parameters.titleAlignment,
+			titleColor: parameters.titleColor,
+		});
 		this.#sendToPlugin({
 			event: "titleParametersDidChange",
 			action: instance.uuid,
 			context: instance.context,
 			device: instance.device.id,
-			payload: {
-				...this.#appearPayload(instance),
-				state: instance.state,
-				title: instance.effectiveTitle,
-				titleParameters: instance.titleParameters,
-			} as unknown as JsonValue,
+			payload,
 		});
 	}
 }
 
 function globalSettingsFrame(settings: JsonObject, id?: string): Frame {
-	return {
+	const frame: Frame = {
 		event: "didReceiveGlobalSettings",
-		...(id === undefined ? {} : { id }),
-		payload: { settings },
+		payload: compactJson({ settings }),
 	};
+	if (id !== undefined) {
+		frame.id = id;
+	}
+	return frame;
+}
+
+function asTarget(value: JsonValue | undefined): Target {
+	return value === 0 || value === 1 || value === 2 ? value : 0;
+}
+
+function isTcpAddress(value: AddressInfo | string | null): value is AddressInfo {
+	return value !== null && typeof value === "object";
+}
+
+function tcpPort(address: AddressInfo | string | null): number {
+	if (!isTcpAddress(address)) {
+		throw new Error("expected a TCP listen address");
+	}
+	return address.port;
 }
 
 /** Commands that only make sense while a key is on screen. */

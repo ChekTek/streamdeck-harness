@@ -217,8 +217,13 @@ function delay(ms: number): Promise<void> {
 	return new Promise((done) => setTimeout(done, ms));
 }
 
+type SlopeFit = {
+	slope: number;
+	stdError: number;
+};
+
 /** Least-squares slope per cycle, with the standard error needed to tell signal from noise. */
-function fitSlope(values: number[]): { slope: number; stdError: number } {
+function fitSlope(values: number[]): SlopeFit {
 	const n = values.length;
 	const meanX = (n - 1) / 2;
 	const meanY = values.reduce((total, value) => total + value, 0) / n;
@@ -239,7 +244,7 @@ function fitSlope(values: number[]): { slope: number; stdError: number } {
 	return { slope, stdError };
 }
 
-function handleSlopes(samples: Sample[]): Record<string, number> {
+function handleSlopes(samples: Sample[]): LifecycleReport["handlesPerCycle"] {
 	const types = new Set(samples.flatMap((entry) => Object.keys(entry.handles)));
 	const slopes: Record<string, number> = {};
 
@@ -272,7 +277,7 @@ function verdictFor(report: LifecycleReport, options: LifecycleOptions): Lifecyc
 		reasons.push(
 			...growingHandles.map(
 				([type, slope]) =>
-					`${type} handles grow by ${slope} per appear/disappear cycle -- ${HANDLE_HINTS[type] ?? "this resource is created on appear and never released on disappear"}.`,
+					`${type} handles grow by ${slope} per appear/disappear cycle -- ${handleHint(type)}.`,
 			),
 		);
 	}
@@ -324,7 +329,7 @@ function verdictFor(report: LifecycleReport, options: LifecycleOptions): Lifecyc
 }
 
 /** What each libuv handle type usually means when it grows once per cycle. */
-const HANDLE_HINTS: Record<string, string> = {
+const HANDLE_HINTS = {
 	Timeout: "a setTimeout/setInterval is never cleared; keep the id and clearInterval it in onWillDisappear",
 	Immediate: "a setImmediate chain keeps rescheduling itself",
 	TCPSocketWrap: "a TCP connection is opened per appear and never closed",
@@ -334,7 +339,16 @@ const HANDLE_HINTS: Record<string, string> = {
 	FSEventWrap: "a file watcher is added per appear and never closed",
 	ChildProcess: "a child process is spawned per appear and never killed",
 	MessagePort: "a worker or MessageChannel port is created per appear and never closed",
-};
+} as const;
+
+function handleHint(type: string): string {
+	for (const [name, hint] of Object.entries(HANDLE_HINTS)) {
+		if (name === type) {
+			return hint;
+		}
+	}
+	return "this resource is created on appear and never released on disappear";
+}
 
 function formatBytes(value: number): string {
 	if (!Number.isFinite(value)) {

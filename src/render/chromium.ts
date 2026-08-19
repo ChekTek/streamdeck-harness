@@ -20,7 +20,7 @@ export async function getBrowser(): Promise<Browser> {
 		})
 		.catch((cause: unknown) => {
 			starting = undefined;
-			const message = (cause as Error).message;
+			const message = cause instanceof Error ? cause.message : String(cause);
 			throw new Error(
 				message.includes("Executable doesn't exist")
 					? "Chromium is not installed. Run: pnpm --dir <harness> browser  (or: npx playwright install chromium)"

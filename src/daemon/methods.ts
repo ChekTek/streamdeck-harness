@@ -3,8 +3,17 @@ import { join } from "node:path";
 
 import { checkLifecycle, LIFECYCLE_DEFAULTS } from "../checks/lifecycle.js";
 import type { ActionInstance } from "../host/action.js";
-import type { JsonObject } from "../host/protocol.js";
-import type { Direction } from "../host/recorder.js";
+import {
+	compactJson,
+	isJsonBoolean,
+	isJsonNumber,
+	isJsonObject,
+	isJsonString,
+	type JsonObject,
+	type JsonValue,
+	parseJsonValue,
+} from "../host/protocol.js";
+import type { Direction, EntryFilter } from "../host/recorder.js";
 import { Inspector } from "../pi/inspector.js";
 import { readPluginLogs } from "../plugin/logs.js";
 import { getBrowser } from "../render/chromium.js";
@@ -16,16 +25,14 @@ export type MethodContext = {
 	shutdown: (reason: string) => Promise<void>;
 };
 
-export type Method = (context: MethodContext, params: Record<string, unknown>) => Promise<unknown> | unknown;
+export type Method = (context: MethodContext, params: JsonObject) => JsonValue | Promise<JsonValue>;
 
-// ------------------------------------------------------------------ param helpers
-
-function str(params: Record<string, unknown>, key: string): string | undefined {
+function str(params: JsonObject, key: string): string | undefined {
 	const value = params[key];
-	return typeof value === "string" ? value : undefined;
+	return isJsonString(value) ? value : undefined;
 }
 
-function requireStr(params: Record<string, unknown>, key: string): string {
+function requireStr(params: JsonObject, key: string): string {
 	const value = str(params, key);
 	if (value === undefined) {
 		throw new Error(`missing required parameter "${key}"`);
@@ -33,24 +40,34 @@ function requireStr(params: Record<string, unknown>, key: string): string {
 	return value;
 }
 
-function num(params: Record<string, unknown>, key: string): number | undefined {
+function num(params: JsonObject, key: string): number | undefined {
 	const value = params[key];
-	return typeof value === "number" ? value : undefined;
+	return isJsonNumber(value) ? value : undefined;
 }
 
-function bool(params: Record<string, unknown>, key: string): boolean | undefined {
+function bool(params: JsonObject, key: string): boolean | undefined {
 	const value = params[key];
-	return typeof value === "boolean" ? value : undefined;
+	return isJsonBoolean(value) ? value : undefined;
 }
 
-function obj(params: Record<string, unknown>, key: string): JsonObject | undefined {
+function obj(params: JsonObject, key: string): JsonObject | undefined {
 	const value = params[key];
-	return typeof value === "object" && value !== null && !Array.isArray(value) ? (value as JsonObject) : undefined;
+	return isJsonObject(value) ? value : undefined;
 }
 
-function strArray(params: Record<string, unknown>, key: string): string[] | undefined {
+function strArray(params: JsonObject, key: string): string[] | undefined {
 	const value = params[key];
-	return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : undefined;
+	return Array.isArray(value) ? value.filter((item) => isJsonString(item)) : undefined;
+}
+
+function isDirection(value: string): value is Direction {
+	return (
+		value === "from-pi" ||
+		value === "from-plugin" ||
+		value === "harness" ||
+		value === "to-pi" ||
+		value === "to-plugin"
+	);
 }
 
 /**
@@ -91,45 +108,59 @@ function requireInspector(session: Session): Inspector {
 
 function describeInstance(session: Session, instance: ActionInstance): JsonObject {
 	const override = instance.effectiveImage;
-	return {
+	const parameters = instance.titleParameters;
+	return compactJson({
 		context: instance.context,
 		action: instance.uuid,
 		name: instance.definition.Name,
 		device: instance.device.id,
 		controller: instance.controller,
-		coordinates: instance.coordinates ?? null,
+		coordinates:
+			instance.coordinates === undefined
+				? null
+				: compactJson({ column: instance.coordinates.column, row: instance.coordinates.row }),
 		visible: instance.visible,
 		state: instance.state,
 		stateCount: instance.stateCount,
 		title: instance.effectiveTitle,
-		titleParameters: instance.titleParameters as unknown as JsonObject[string],
+		titleParameters: compactJson({
+			fontFamily: parameters.fontFamily,
+			fontSize: parameters.fontSize,
+			fontStyle: parameters.fontStyle,
+			fontUnderline: parameters.fontUnderline,
+			showTitle: parameters.showTitle,
+			titleAlignment: parameters.titleAlignment,
+			titleColor: parameters.titleColor,
+		}),
 		imageSource: override === undefined ? "manifest" : "setImage",
 		manifestImage: instance.manifestState?.Image ?? null,
 		settings: session.host.settings.get(instance.context),
 		resources: session.host.settings.getResources(instance.context),
 		hasPropertyInspector: session.host.hasUi(instance.context),
-		flashes: instance.flashes as unknown as JsonObject[string],
-	};
+		flashes: instance.flashes.map((flash) => compactJson({ kind: flash.kind, at: flash.at })),
+	});
 }
 
-// ------------------------------------------------------------------ methods
+function wireJson(value: JsonValue): JsonValue {
+	return parseJsonValue(JSON.stringify(value));
+}
 
-export const methods: Record<string, Method> = {
-	info({ session }) {
+export const methods = {
+	info({ session }: MethodContext): JsonValue {
 		return session.describe();
 	},
 
-	close({ shutdown }) {
+	close({ shutdown }: MethodContext): JsonValue {
 		// Reply first: the shutdown tears down the very connection carrying this response.
 		setTimeout(() => void shutdown("requested"), 0);
-		return { closed: true };
+		return compactJson({ closed: true });
 	},
 
-	actions({ session }) {
+	actions({ session }: MethodContext): JsonValue {
 		return session.host.allActions().map((instance) => describeInstance(session, instance));
 	},
 
-	add({ session }, params) {
+	add({ session }: MethodContext, params: JsonObject): JsonValue {
 		const column = num(params, "column");
 		const row = num(params, "row");
 		const deviceId = str(params, "device");
@@ -140,39 +171,39 @@ export const methods: Record<string, Method> = {
 		}
 
 		const controller = str(params, "controller");
-		const instance = session.host.addAction({
+		const added = session.host.addAction({
 			uuid: requireStr(params, "uuid"),
-			...(device === undefined ? {} : { device }),
-			...(column === undefined || row === undefined ? {} : { coordinates: { column, row } }),
-			...(controller === "Keypad" || controller === "Encoder" ? { controller } : {}),
-			...(obj(params, "settings") === undefined ? {} : { settings: obj(params, "settings")! }),
-			...(num(params, "state") === undefined ? {} : { state: num(params, "state")! }),
-			...(str(params, "title") === undefined ? {} : { title: str(params, "title")! }),
-			...(bool(params, "multiAction") === undefined ? {} : { isInMultiAction: bool(params, "multiAction")! }),
-			...(bool(params, "appear") === undefined ? {} : { appear: bool(params, "appear")! }),
+			device,
+			coordinates: column === undefined || row === undefined ? undefined : { column, row },
+			controller: controller === "Keypad" || controller === "Encoder" ? controller : undefined,
+			settings: obj(params, "settings"),
+			state: num(params, "state"),
+			title: str(params, "title"),
+			isInMultiAction: bool(params, "multiAction"),
+			appear: bool(params, "appear"),
 		});
-		return describeInstance(session, instance);
+		return describeInstance(session, added);
 	},
 
-	remove({ session }, params) {
+	remove({ session }: MethodContext, params: JsonObject): JsonValue {
 		const instance = resolve(session, requireStr(params, "ref"));
 		session.host.removeAction(instance);
-		return { removed: instance.context, action: instance.uuid };
+		return compactJson({ removed: instance.context, action: instance.uuid });
 	},
 
-	appear({ session }, params) {
+	appear({ session }: MethodContext, params: JsonObject): JsonValue {
 		const instance = resolve(session, requireStr(params, "ref"));
 		session.host.appear(instance);
 		return describeInstance(session, instance);
 	},
 
-	disappear({ session }, params) {
+	disappear({ session }: MethodContext, params: JsonObject): JsonValue {
 		const instance = resolve(session, requireStr(params, "ref"));
 		session.host.disappear(instance);
-		return { context: instance.context, visible: instance.visible };
+		return compactJson({ context: instance.context, visible: instance.visible });
 	},
 
-	async press({ session }, params) {
+	async press({ session }: MethodContext, params: JsonObject): Promise<JsonValue> {
 		const instance = resolve(session, requireStr(params, "ref"));
 		const holdMs = num(params, "holdMs") ?? 40;
 		const desired = num(params, "userDesiredState");
@@ -186,19 +217,19 @@ export const methods: Record<string, Method> = {
 		return describeInstance(session, instance);
 	},
 
-	keyDown({ session }, params) {
+	keyDown({ session }: MethodContext, params: JsonObject): JsonValue {
 		const instance = resolve(session, requireStr(params, "ref"));
 		session.host.keyDown(instance, num(params, "userDesiredState"));
-		return { context: instance.context };
+		return compactJson({ context: instance.context });
 	},
 
-	keyUp({ session }, params) {
+	keyUp({ session }: MethodContext, params: JsonObject): JsonValue {
 		const instance = resolve(session, requireStr(params, "ref"));
 		session.host.keyUp(instance, num(params, "userDesiredState"));
-		return { context: instance.context };
+		return compactJson({ context: instance.context });
 	},
 
-	key({ session }, params) {
+	key({ session }: MethodContext, params: JsonObject): JsonValue {
 		return describeInstance(session, resolve(session, requireStr(params, "ref")));
 	},
 
@@ -206,7 +237,7 @@ export const methods: Record<string, Method> = {
 	 * Renders the key as Stream Deck would show it and writes a PNG. The SVG source and its
 	 * Tiny 1.2 lint come back alongside -- reading those is cheaper than reading the image.
 	 */
-	async screenshot({ session }, params) {
+	async screenshot({ session }: MethodContext, params: JsonObject): Promise<JsonValue> {
 		const instance = resolve(session, requireStr(params, "ref"));
 		const size = num(params, "size") ?? 144;
 		const image = resolveKeyImage(session.project, instance);
@@ -229,7 +260,7 @@ export const methods: Record<string, Method> = {
 			writeFileSync(svgPath, image.svg);
 		}
 
-		return {
+		return compactJson({
 			png: pngPath,
 			svg: svgPath ?? null,
 			size,
@@ -241,17 +272,31 @@ export const methods: Record<string, Method> = {
 			lint:
 				image.lint === undefined
 					? null
-					: { errors: image.lint.errors, warnings: image.lint.warnings, findings: image.lint.findings },
+					: compactJson({
+						errors: image.lint.errors,
+						warnings: image.lint.warnings,
+						findings: image.lint.findings.map((finding) =>
+							compactJson({
+								severity: finding.severity,
+								source: finding.source,
+								rule: finding.rule,
+								message: finding.message,
+								fix: finding.fix,
+								line: finding.line,
+								column: finding.column,
+							}),
+						),
+					}),
 			note: "Rendered in headless Chromium, which is more permissive than Stream Deck's Qt renderer. Trust the lint over the picture.",
-		};
+		});
 	},
 
-	getSettings({ session }, params) {
+	getSettings({ session }: MethodContext, params: JsonObject): JsonValue {
 		const instance = resolve(session, requireStr(params, "ref"));
 		return session.host.settings.get(instance.context);
 	},
 
-	setSettings({ session }, params) {
+	setSettings({ session }: MethodContext, params: JsonObject): JsonValue {
 		const instance = resolve(session, requireStr(params, "ref"));
 		const settings = obj(params, "settings");
 		if (settings === undefined) {
@@ -261,11 +306,11 @@ export const methods: Record<string, Method> = {
 		return session.host.settings.get(instance.context);
 	},
 
-	getGlobalSettings({ session }) {
+	getGlobalSettings({ session }: MethodContext): JsonValue {
 		return session.host.settings.getGlobal();
 	},
 
-	setGlobalSettings({ session }, params) {
+	setGlobalSettings({ session }: MethodContext, params: JsonObject): JsonValue {
 		const settings = obj(params, "settings");
 		if (settings === undefined) {
 			throw new Error('missing required parameter "settings" (a JSON object)');
@@ -274,16 +319,16 @@ export const methods: Record<string, Method> = {
 		return session.host.settings.getGlobal();
 	},
 
-	setSecrets({ session }, params) {
+	setSecrets({ session }: MethodContext, params: JsonObject): JsonValue {
 		const secrets = obj(params, "secrets");
 		if (secrets === undefined) {
 			throw new Error('missing required parameter "secrets" (a JSON object)');
 		}
 		session.host.pushSecrets(secrets);
-		return { secrets: Object.keys(secrets) };
+		return compactJson({ secrets: Object.keys(secrets) });
 	},
 
-	async piOpen({ session }, params) {
+	async piOpen({ session }: MethodContext, params: JsonObject): Promise<JsonValue> {
 		const instance = resolve(session, requireStr(params, "ref"));
 		if (session.propertyInspector !== undefined) {
 			await session.propertyInspector.close();
@@ -296,8 +341,8 @@ export const methods: Record<string, Method> = {
 			info: session.host.info,
 			settings: session.host.settings.get(instance.context),
 			hostPort: session.host.port,
-			...(num(params, "width") === undefined ? {} : { width: num(params, "width")! }),
-			...(num(params, "height") === undefined ? {} : { height: num(params, "height")! }),
+			width: num(params, "width"),
+			height: num(params, "height"),
 		});
 		session.propertyInspector = inspector;
 
@@ -306,7 +351,7 @@ export const methods: Record<string, Method> = {
 			? undefined
 			: "The page never called connectElgatoStreamDeckSocket. Check that the property inspector loads its SDPI bundle, and read consoleErrors.";
 
-		return {
+		return compactJson({
 			url: inspector.url,
 			context: instance.context,
 			action: instance.uuid,
@@ -315,55 +360,58 @@ export const methods: Record<string, Method> = {
 			fields: await inspector.fields(),
 			consoleErrors: inspector.consoleLines.filter((line) => line.type === "error").map((line) => line.text),
 			pageErrors: inspector.pageErrors,
-			...(hint === undefined ? {} : { hint }),
-		};
+			hint,
+		});
 	},
 
-	async piSnapshot({ session }) {
-		return { snapshot: await requireInspector(session).snapshot() };
+	async piSnapshot({ session }: MethodContext): Promise<JsonValue> {
+		return compactJson({ snapshot: await requireInspector(session).snapshot() });
 	},
 
-	async piFields({ session }) {
+	async piFields({ session }: MethodContext): Promise<JsonValue> {
 		return requireInspector(session).fields();
 	},
 
-	async piSet({ session }, params) {
+	async piSet({ session }: MethodContext, params: JsonObject): Promise<JsonValue> {
 		const inspector = requireInspector(session);
-		const applied = await inspector.setField(requireStr(params, "setting"), params.value);
-		// Give the component time to round-trip its setSettings through the host.
+		const applied = await inspector.setField(requireStr(params, "setting"), params.value ?? null);
 		await new Promise((done) => setTimeout(done, num(params, "settleMs") ?? 300));
-		return {
-			...applied,
+		return compactJson({
+			setting: applied.setting,
+			value: applied.value,
 			settings: session.host.settings.get(inspector.context),
 			globalSettings: session.host.settings.getGlobal(),
-		};
+		});
 	},
 
-	async piClick({ session }, params) {
+	async piClick({ session }: MethodContext, params: JsonObject): Promise<JsonValue> {
 		const inspector = requireInspector(session);
 		await inspector.click(requireStr(params, "target"));
 		await new Promise((done) => setTimeout(done, num(params, "settleMs") ?? 300));
-		return { clicked: requireStr(params, "target"), settings: session.host.settings.get(inspector.context) };
+		return compactJson({ clicked: requireStr(params, "target"), settings: session.host.settings.get(inspector.context) });
 	},
 
-	async piScreenshot({ session }, params) {
+	async piScreenshot({ session }: MethodContext, params: JsonObject): Promise<JsonValue> {
 		const inspector = requireInspector(session);
 		const stem = str(params, "name") ?? `pi-${inspector.context.slice(0, 8)}`;
-		return {
+		return compactJson({
 			png: await inspector.screenshot(session.artifacts, stem, bool(params, "fullPage") ?? true),
 			note: "Rendered in headless Chromium; the real property inspector runs in QtWebEngine.",
-		};
+		});
 	},
 
-	piConsole({ session }) {
+	piConsole({ session }: MethodContext): JsonValue {
 		const inspector = requireInspector(session);
-		return { lines: inspector.consoleLines, pageErrors: inspector.pageErrors };
+		return compactJson({
+			lines: inspector.consoleLines.map((line) => compactJson({ type: line.type, text: line.text })),
+			pageErrors: inspector.pageErrors,
+		});
 	},
 
-	async piClose({ session }) {
+	async piClose({ session }: MethodContext): Promise<JsonValue> {
 		const inspector = session.propertyInspector;
 		if (inspector === undefined) {
-			return { closed: false };
+			return compactJson({ closed: false });
 		}
 		const instance = session.host.allActions().find((candidate) => candidate.context === inspector.context);
 		await inspector.close();
@@ -371,15 +419,15 @@ export const methods: Record<string, Method> = {
 		if (instance !== undefined) {
 			session.host.propertyInspectorDidDisappear(instance);
 		}
-		return { closed: true };
+		return compactJson({ closed: true });
 	},
 
-	async checkLifecycle({ session }, params) {
+	async checkLifecycle({ session }: MethodContext, params: JsonObject): Promise<JsonValue> {
 		const interact = str(params, "interact") ?? "press";
 		if (interact !== "press" && interact !== "none") {
 			throw new Error('--interact must be "press" or "none"');
 		}
-		return checkLifecycle(session, {
+		const report = await checkLifecycle(session, {
 			uuid: requireStr(params, "uuid"),
 			cycles: num(params, "cycles") ?? LIFECYCLE_DEFAULTS.cycles,
 			warmup: num(params, "warmup") ?? LIFECYCLE_DEFAULTS.warmup,
@@ -391,54 +439,130 @@ export const methods: Record<string, Method> = {
 			maxHandlesPerCycle: num(params, "maxHandlesPerCycle") ?? LIFECYCLE_DEFAULTS.maxHandlesPerCycle,
 			heapSnapshot: bool(params, "heapSnapshot") ?? false,
 		});
+		return wireJson(parseJsonValue(JSON.stringify(report)));
 	},
 
-	events({ session }, params) {
+	events({ session }: MethodContext, params: JsonObject): JsonValue {
 		const limit = num(params, "limit") ?? 200;
-		const entries = session.host.recorder.entries({
-			...(strArray(params, "direction") === undefined
-				? {}
-				: { direction: strArray(params, "direction") as Direction[] }),
-			...(strArray(params, "event") === undefined ? {} : { event: strArray(params, "event")! }),
-			...(str(params, "context") === undefined ? {} : { context: str(params, "context")! }),
-			...(str(params, "action") === undefined ? {} : { action: str(params, "action")! }),
-			...(num(params, "sinceSeq") === undefined ? {} : { sinceSeq: num(params, "sinceSeq")! }),
-		});
+		const filter: EntryFilter = {};
+		const direction = strArray(params, "direction")?.filter((value) => isDirection(value));
+		if (direction !== undefined) {
+			filter.direction = direction;
+		}
+		const event = strArray(params, "event");
+		if (event !== undefined) {
+			filter.event = event;
+		}
+		const context = str(params, "context");
+		if (context !== undefined) {
+			filter.context = context;
+		}
+		const action = str(params, "action");
+		if (action !== undefined) {
+			filter.action = action;
+		}
+		const sinceSeq = num(params, "sinceSeq");
+		if (sinceSeq !== undefined) {
+			filter.sinceSeq = sinceSeq;
+		}
 
-		return {
+		const entries = session.host.recorder.entries(filter);
+		return compactJson({
 			total: entries.length,
-			entries: entries.slice(-limit),
-			violations: session.host.recorder.violations(num(params, "sinceSeq") ?? 0),
-		};
+			entries: entries.slice(-limit).map((entry) =>
+				compactJson({
+					seq: entry.seq,
+					at: entry.at,
+					direction: entry.direction,
+					event: entry.event,
+					action: entry.action,
+					context: entry.context,
+					frame: entry.frame,
+				}),
+			),
+			violations: session.host.recorder.violations(num(params, "sinceSeq") ?? 0).map((violation) =>
+				compactJson({
+					seq: violation.seq,
+					at: violation.at,
+					kind: violation.kind,
+					message: violation.message,
+					context: violation.context,
+					action: violation.action,
+					detail: violation.detail,
+				}),
+			),
+		});
 	},
 
-	violations({ session }, params) {
-		return session.host.recorder.violations(num(params, "sinceSeq") ?? 0);
+	violations({ session }: MethodContext, params: JsonObject): JsonValue {
+		return session.host.recorder.violations(num(params, "sinceSeq") ?? 0).map((violation) =>
+			compactJson({
+				seq: violation.seq,
+				at: violation.at,
+				kind: violation.kind,
+				message: violation.message,
+				context: violation.context,
+				action: violation.action,
+				detail: violation.detail,
+			}),
+		);
 	},
 
-	async waitQuiet({ session }, params) {
+	async waitQuiet({ session }: MethodContext, params: JsonObject): Promise<JsonValue> {
 		const quietMs = num(params, "quietMs") ?? 500;
 		const timeoutMs = num(params, "timeoutMs") ?? 10_000;
 		await session.host.recorder.waitForQuiet(quietMs, timeoutMs);
-		return { quiet: true, seq: session.host.recorder.nextSeq };
+		return compactJson({ quiet: true, seq: session.host.recorder.nextSeq });
 	},
 
-	logs({ session }, params) {
+	logs({ session }: MethodContext, params: JsonObject): JsonValue {
 		const limit = num(params, "limit") ?? 100;
 		const sinceStart = bool(params, "sinceStart") ?? true;
 		const lines = readPluginLogs(session.project.root, {
-			...(sinceStart ? { sinceMs: session.startedAt } : {}),
-			...(strArray(params, "level") === undefined ? {} : { level: strArray(params, "level")! }),
+			sinceMs: sinceStart ? session.startedAt : undefined,
+			level: strArray(params, "level"),
 		});
-		return { total: lines.length, lines: lines.slice(-limit) };
+		return compactJson({
+			total: lines.length,
+			lines: lines.slice(-limit).map((line) =>
+				compactJson({
+					file: line.file,
+					timestamp: line.timestamp,
+					level: line.level,
+					text: line.text,
+				}),
+			),
+		});
 	},
 
-	output({ session }, params) {
+	output({ session }: MethodContext, params: JsonObject): JsonValue {
 		const limit = num(params, "limit") ?? 100;
-		return {
+		const exit = session.plugin.exitInfo;
+		return compactJson({
 			running: session.plugin.running,
-			exit: session.plugin.exitInfo ?? null,
-			lines: session.plugin.output.slice(-limit),
-		};
+			exit:
+				exit === undefined
+					? null
+					: compactJson({
+						code: exit.code,
+						signal: exit.signal,
+					}),
+			lines: session.plugin.output.slice(-limit).map((line) =>
+				compactJson({
+					stream: line.stream,
+					at: line.at,
+					text: line.text,
+				}),
+			),
+		});
 	},
-};
+} satisfies { [name: string]: Method };
+
+export function methodFor(name: string): Method | undefined {
+	for (const [key, method] of Object.entries(methods)) {
+		if (key === name) {
+			return method;
+		}
+	}
+	return undefined;
+}

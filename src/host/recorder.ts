@@ -1,6 +1,6 @@
 import { EventEmitter } from "node:events";
 
-import type { Frame } from "./protocol.js";
+import { isJsonString, type Frame, type JsonValue } from "./protocol.js";
 
 export type Direction = "from-pi" | "from-plugin" | "harness" | "to-pi" | "to-plugin";
 
@@ -22,7 +22,7 @@ export type Violation = {
 	message: string;
 	context?: string;
 	action?: string;
-	detail?: unknown;
+	detail?: JsonValue;
 };
 
 export type EntryFilter = {
@@ -91,10 +91,10 @@ export class Recorder extends EventEmitter {
 			event: frame.event,
 			frame,
 		};
-		if (typeof frame.action === "string") {
+		if (isJsonString(frame.action)) {
 			entry.action = frame.action;
 		}
-		if (typeof frame.context === "string") {
+		if (isJsonString(frame.context)) {
 			entry.context = frame.context;
 		}
 

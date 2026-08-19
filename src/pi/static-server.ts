@@ -3,7 +3,7 @@ import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { extname, join, normalize, resolve, sep } from "node:path";
 
-const CONTENT_TYPES: Record<string, string> = {
+const CONTENT_TYPES = {
 	".html": "text/html; charset=utf-8",
 	".htm": "text/html; charset=utf-8",
 	".js": "text/javascript; charset=utf-8",
@@ -20,7 +20,20 @@ const CONTENT_TYPES: Record<string, string> = {
 	".woff2": "font/woff2",
 	".ttf": "font/ttf",
 	".map": "application/json; charset=utf-8",
-};
+} as const;
+
+function contentTypeFor(extension: string): string {
+	for (const [suffix, type] of Object.entries(CONTENT_TYPES)) {
+		if (suffix === extension) {
+			return type;
+		}
+	}
+	return "application/octet-stream";
+}
+
+function isTcpAddress(value: AddressInfo | string | null): value is AddressInfo {
+	return value !== null && typeof value === "object";
+}
 
 /**
  * Serves the `.sdPlugin` folder over loopback HTTP. The property inspector cannot run from
@@ -66,7 +79,7 @@ export class StaticServer {
 			}
 
 			response.writeHead(200, {
-				"content-type": CONTENT_TYPES[extname(target).toLowerCase()] ?? "application/octet-stream",
+				"content-type": contentTypeFor(extname(target).toLowerCase()),
 				"cache-control": "no-store",
 			});
 			createReadStream(target).pipe(response);
@@ -81,7 +94,11 @@ export class StaticServer {
 			});
 		});
 
-		this.#port = (server.address() as AddressInfo).port;
+		const address = server.address();
+		if (!isTcpAddress(address)) {
+			throw new Error("expected a TCP listen address");
+		}
+		this.#port = address.port;
 		return this.#port;
 	}
 }

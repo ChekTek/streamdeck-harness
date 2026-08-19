@@ -1,3 +1,5 @@
+import type { JsonValue } from "../host/protocol.js";
+
 let jsonMode = false;
 
 export function setJsonMode(value: boolean): void {
@@ -16,12 +18,12 @@ export function print(text: string): void {
  * Prints `value` as JSON when `--json` is set, otherwise renders `human`. Agents get
  * structured output; a person reading the terminal gets something scannable.
  */
-export function emit(value: unknown, human: (value: never) => string): void {
+export function emit(value: JsonValue, human: (value: JsonValue) => string): void {
 	if (jsonMode) {
 		print(JSON.stringify(value, null, 2));
 		return;
 	}
-	print(human(value as never));
+	print(human(value));
 }
 
 export function fail(message: string): never {

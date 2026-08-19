@@ -1,6 +1,15 @@
 import { isAbsolute, resolve } from "node:path";
 
 import type { DaemonClient } from "../cli/client.js";
+import {
+	compactJson,
+	errorMessage,
+	isJsonNumber,
+	isJsonObject,
+	isJsonString,
+	type JsonObject,
+	type JsonValue,
+} from "../host/protocol.js";
 import type { Expectation, Scenario, ScenarioReport, Step, StepResult } from "./schema.js";
 
 type Aliases = Map<string, string>;
@@ -20,7 +29,7 @@ export async function runScenario(
 	const artifacts: string[] = [];
 
 	if (scenario.globalSettings !== undefined) {
-		await client.call("setGlobalSettings", { settings: scenario.globalSettings });
+		await client.call("setGlobalSettings", compactJson({ settings: scenario.globalSettings }));
 	}
 
 	for (const [index, step] of scenario.steps.entries()) {
@@ -32,7 +41,7 @@ export async function runScenario(
 				result.failures.push(...(await assertExpectation(client, step.expect, aliases)));
 			}
 		} catch (cause) {
-			result.failures.push((cause as Error).message);
+			result.failures.push(errorMessage(cause));
 		}
 
 		result.ok = result.failures.length === 0;
@@ -64,52 +73,76 @@ function resolveAlias(aliases: Aliases, ref: string): string {
 	return aliases.get(ref) ?? ref;
 }
 
+async function callObject(client: DaemonClient, method: string, params: JsonObject = {}): Promise<JsonObject> {
+	const result = await client.call(method, params);
+	if (!isJsonObject(result)) {
+		throw new Error(`${method} returned a non-object result`);
+	}
+	return result;
+}
+
 async function runStep(
 	client: DaemonClient,
 	step: Step,
 	aliases: Aliases,
 	artifacts: string[],
 	baseDir: string,
-): Promise<unknown> {
+): Promise<JsonValue> {
 	if (step.add !== undefined) {
-		const created = await client.call<{ context: string }>("add", {
-			uuid: step.add,
-			...(step.settings === undefined ? {} : { settings: step.settings }),
-			...(step.column === undefined ? {} : { column: step.column }),
-			...(step.row === undefined ? {} : { row: step.row }),
-			...(step.state === undefined ? {} : { state: step.state }),
-			...(step.title === undefined ? {} : { title: step.title }),
-		});
+		const created = await callObject(
+			client,
+			"add",
+			compactJson({
+				uuid: step.add,
+				settings: step.settings,
+				column: step.column,
+				row: step.row,
+				state: step.state,
+				title: step.title,
+			}),
+		);
+		if (!isJsonString(created.context)) {
+			throw new Error("add did not return a context");
+		}
 		aliases.set(step.as ?? step.add, created.context);
 		return created;
 	}
 
 	if (step.remove !== undefined) {
-		return client.call("remove", { ref: resolveAlias(aliases, step.remove) });
+		return client.call("remove", compactJson({ ref: resolveAlias(aliases, step.remove) }));
 	}
 	if (step.appear !== undefined) {
-		return client.call("appear", { ref: resolveAlias(aliases, step.appear) });
+		return client.call("appear", compactJson({ ref: resolveAlias(aliases, step.appear) }));
 	}
 	if (step.disappear !== undefined) {
-		return client.call("disappear", { ref: resolveAlias(aliases, step.disappear) });
+		return client.call("disappear", compactJson({ ref: resolveAlias(aliases, step.disappear) }));
 	}
 
 	if (step.press !== undefined) {
-		return client.call("press", {
-			ref: resolveAlias(aliases, step.press),
-			...(step.hold === undefined ? {} : { holdMs: step.hold }),
-			...(step.settle === undefined ? {} : { settleMs: step.settle }),
-		});
+		return client.call(
+			"press",
+			compactJson({
+				ref: resolveAlias(aliases, step.press),
+				holdMs: step.hold,
+				settleMs: step.settle,
+			}),
+		);
 	}
 
 	if (step.screenshot !== undefined) {
-		const shot = await client.call<{ png: string; svg: string | null; lint: { errors: number } | null }>("screenshot", {
-			ref: resolveAlias(aliases, step.screenshot),
-			...(step.shotName === undefined ? {} : { name: step.shotName }),
-			...(step.size === undefined ? {} : { size: step.size }),
-		});
-		artifacts.push(shot.png);
-		if (shot.svg !== null) {
+		const shot = await callObject(
+			client,
+			"screenshot",
+			compactJson({
+				ref: resolveAlias(aliases, step.screenshot),
+				name: step.shotName,
+				size: step.size,
+			}),
+		);
+		if (isJsonString(shot.png)) {
+			artifacts.push(shot.png);
+		}
+		if (isJsonString(shot.svg)) {
 			artifacts.push(shot.svg);
 		}
 		return shot;
@@ -119,40 +152,49 @@ async function runStep(
 		if (step.ref === undefined) {
 			throw new Error('setSettings needs a "ref" naming the action instance');
 		}
-		return client.call("setSettings", { ref: resolveAlias(aliases, step.ref), settings: step.setSettings });
+		return client.call(
+			"setSettings",
+			compactJson({ ref: resolveAlias(aliases, step.ref), settings: step.setSettings }),
+		);
 	}
 	if (step.setGlobalSettings !== undefined) {
-		return client.call("setGlobalSettings", { settings: step.setGlobalSettings });
+		return client.call("setGlobalSettings", compactJson({ settings: step.setGlobalSettings }));
 	}
 	if (step.setSecrets !== undefined) {
-		return client.call("setSecrets", { secrets: step.setSecrets });
+		return client.call("setSecrets", compactJson({ secrets: step.setSecrets }));
 	}
 
 	if (step.piOpen !== undefined) {
-		const opened = await client.call<{ connected: boolean; hint?: string }>("piOpen", {
-			ref: resolveAlias(aliases, step.piOpen),
-		});
-		if (!opened.connected) {
-			throw new Error(`property inspector never connected. ${opened.hint ?? ""}`.trim());
+		const opened = await callObject(client, "piOpen", compactJson({ ref: resolveAlias(aliases, step.piOpen) }));
+		if (opened.connected !== true) {
+			throw new Error(`property inspector never connected. ${isJsonString(opened.hint) ? opened.hint : ""}`.trim());
 		}
 		return opened;
 	}
 	if (step.piSet !== undefined) {
-		return client.call("piSet", {
-			setting: step.piSet,
-			value: step.value,
-			...(step.settle === undefined ? {} : { settleMs: step.settle }),
-		});
+		return client.call(
+			"piSet",
+			compactJson({
+				setting: step.piSet,
+				value: step.value,
+				settleMs: step.settle,
+			}),
+		);
 	}
 	if (step.piClick !== undefined) {
-		return client.call("piClick", {
-			target: step.piClick,
-			...(step.settle === undefined ? {} : { settleMs: step.settle }),
-		});
+		return client.call(
+			"piClick",
+			compactJson({
+				target: step.piClick,
+				settleMs: step.settle,
+			}),
+		);
 	}
 	if (step.piScreenshot !== undefined) {
-		const shot = await client.call<{ png: string }>("piScreenshot", { name: step.piScreenshot });
-		artifacts.push(shot.png);
+		const shot = await callObject(client, "piScreenshot", compactJson({ name: step.piScreenshot }));
+		if (isJsonString(shot.png)) {
+			artifacts.push(shot.png);
+		}
 		return shot;
 	}
 	if (step.piClose === true) {
@@ -160,34 +202,35 @@ async function runStep(
 	}
 
 	if (step.waitQuiet !== undefined) {
-		return client.call("waitQuiet", { quietMs: step.waitQuiet });
+		return client.call("waitQuiet", compactJson({ quietMs: step.waitQuiet }));
 	}
 
 	if (step.checkLifecycle !== undefined) {
-		const report = await client.call<{ verdict: string; reasons: string[]; heapSnapshotPath?: string }>(
+		const report = await callObject(
+			client,
 			"checkLifecycle",
-			{
+			compactJson({
 				uuid: step.checkLifecycle,
-				...(step.cycles === undefined ? {} : { cycles: step.cycles }),
-				...(step.warmup === undefined ? {} : { warmup: step.warmup }),
-				...(step.settings === undefined ? {} : { settings: step.settings }),
-				...(step.interact === undefined ? {} : { interact: step.interact }),
-			},
+				cycles: step.cycles,
+				warmup: step.warmup,
+				settings: step.settings,
+				interact: step.interact,
+			}),
 		);
-		if (report.heapSnapshotPath !== undefined) {
+		if (isJsonString(report.heapSnapshotPath)) {
 			artifacts.push(report.heapSnapshotPath);
 		}
 		const wanted = step.expectVerdict ?? "pass";
 		if (report.verdict !== wanted) {
+			const reasons = Array.isArray(report.reasons) ? report.reasons.map((reason) => String(reason)) : [];
 			throw new Error(
-				`lifecycle verdict was "${report.verdict}", expected "${wanted}":\n    ${report.reasons.join("\n    ")}`,
+				`lifecycle verdict was "${String(report.verdict)}", expected "${wanted}":\n    ${reasons.join("\n    ")}`,
 			);
 		}
 		return report;
 	}
 
 	if (step.lintSvg !== undefined) {
-		// Linting is static, so it is done in-process rather than over the session.
 		const { lintPath } = await import("./lint-step.js");
 		const report = lintPath(resolvePath(step.lintSvg, baseDir));
 		const failed = report.errors > 0 || (step.allowWarnings === false && report.warnings > 0);
@@ -196,11 +239,15 @@ async function runStep(
 				`${report.errors} SVG error(s) and ${report.warnings} warning(s):\n    ${report.summary.join("\n    ")}`,
 			);
 		}
-		return report;
+		return compactJson({
+			errors: report.errors,
+			warnings: report.warnings,
+			summary: report.summary,
+		});
 	}
 
 	if (step.expect !== undefined) {
-		return undefined;
+		return null;
 	}
 	throw new Error(`step has no recognised action: ${JSON.stringify(step)}`);
 }
@@ -209,7 +256,7 @@ async function assertExpectation(client: DaemonClient, expectation: Expectation,
 	const failures: string[] = [];
 
 	if (expectation.key !== undefined) {
-		const key = await client.call<Record<string, unknown>>("key", { ref: resolveAlias(aliases, expectation.key) });
+		const key = await callObject(client, "key", compactJson({ ref: resolveAlias(aliases, expectation.key) }));
 		check(
 			failures,
 			expectation.state === undefined || key.state === expectation.state,
@@ -238,31 +285,38 @@ async function assertExpectation(client: DaemonClient, expectation: Expectation,
 	}
 
 	if (expectation.settingsOf !== undefined && expectation.settingsContain !== undefined) {
-		const settings = await client.call<Record<string, unknown>>("getSettings", {
-			ref: resolveAlias(aliases, expectation.settingsOf),
-		});
+		const settings = await callObject(
+			client,
+			"getSettings",
+			compactJson({ ref: resolveAlias(aliases, expectation.settingsOf) }),
+		);
 		failures.push(...missingEntries(settings, expectation.settingsContain, "settings"));
 	}
 
 	if (expectation.globalSettingsContain !== undefined) {
-		const global = await client.call<Record<string, unknown>>("getGlobalSettings");
+		const global = await callObject(client, "getGlobalSettings");
 		failures.push(...missingEntries(global, expectation.globalSettingsContain, "global settings"));
 	}
 
 	if (expectation.events !== undefined) {
 		for (const wanted of expectation.events) {
-			const found = await client.call<{ total: number }>("events", {
-				event: [wanted.event],
-				...(wanted.context === undefined ? {} : { context: resolveAlias(aliases, wanted.context) }),
-				...(wanted.action === undefined ? {} : { action: wanted.action }),
-				limit: 1,
-			});
+			const found = await callObject(
+				client,
+				"events",
+				compactJson({
+					event: [wanted.event],
+					context: wanted.context === undefined ? undefined : resolveAlias(aliases, wanted.context),
+					action: wanted.action,
+					limit: 1,
+				}),
+			);
+			const total = isJsonNumber(found.total) ? found.total : 0;
 			const min = wanted.min ?? 1;
-			check(failures, found.total >= min, `saw ${found.total} "${wanted.event}" event(s), expected at least ${min}`);
+			check(failures, total >= min, `saw ${total} "${wanted.event}" event(s), expected at least ${min}`);
 			check(
 				failures,
-				wanted.max === undefined || found.total <= wanted.max,
-				`saw ${found.total} "${wanted.event}" event(s), expected at most ${String(wanted.max)}`,
+				wanted.max === undefined || total <= wanted.max,
+				`saw ${total} "${wanted.event}" event(s), expected at most ${String(wanted.max)}`,
 			);
 		}
 	}
@@ -272,31 +326,36 @@ async function assertExpectation(client: DaemonClient, expectation: Expectation,
 		expectation.maxViolations !== undefined ||
 		expectation.violationKinds !== undefined
 	) {
-		const all = await client.call<Array<{ kind: string; message: string }>>("violations");
+		const allValue = await client.call("violations");
+		const all = Array.isArray(allValue) ? allValue.filter((entry) => isJsonObject(entry)) : [];
 		const relevant =
 			expectation.violationKinds === undefined
 				? all
-				: all.filter((violation) => expectation.violationKinds!.includes(violation.kind));
+				: all.filter((violation) => {
+					const kind = violation.kind;
+					return isJsonString(kind) && expectation.violationKinds!.includes(kind);
+				});
 		const max = expectation.noViolations === true ? 0 : (expectation.maxViolations ?? 0);
 		check(
 			failures,
 			relevant.length <= max,
 			`${relevant.length} violation(s), expected at most ${max}:\n    ${relevant
 				.slice(0, 5)
-				.map((v) => `${v.kind}: ${v.message}`)
+				.map((violation) => `${String(violation.kind)}: ${String(violation.message)}`)
 				.join("\n    ")}`,
 		);
 	}
 
 	if (expectation.maxLogErrors !== undefined) {
-		const logs = await client.call<{ total: number; lines: Array<{ text: string }> }>("logs", {
-			level: ["ERROR"],
-			limit: 5,
-		});
+		const logs = await callObject(client, "logs", compactJson({ level: ["ERROR"], limit: 5 }));
+		const total = isJsonNumber(logs.total) ? logs.total : 0;
+		const lines = Array.isArray(logs.lines) ? logs.lines : [];
 		check(
 			failures,
-			logs.total <= expectation.maxLogErrors,
-			`${logs.total} ERROR line(s) in the plugin log, expected at most ${expectation.maxLogErrors}:\n    ${logs.lines.map((line) => line.text).join("\n    ")}`,
+			total <= expectation.maxLogErrors,
+			`${total} ERROR line(s) in the plugin log, expected at most ${expectation.maxLogErrors}:\n    ${lines
+				.map((line) => (isJsonObject(line) ? String(line.text) : String(line)))
+				.join("\n    ")}`,
 		);
 	}
 
@@ -309,7 +368,7 @@ function check(failures: string[], condition: boolean, message: string): void {
 	}
 }
 
-function missingEntries(actual: Record<string, unknown>, wanted: Record<string, unknown>, label: string): string[] {
+function missingEntries(actual: JsonObject, wanted: JsonObject, label: string): string[] {
 	return Object.entries(wanted)
 		.filter(([key, value]) => JSON.stringify(actual[key]) !== JSON.stringify(value))
 		.map(([key, value]) => `${label}.${key} is ${JSON.stringify(actual[key])}, expected ${JSON.stringify(value)}`);
@@ -317,7 +376,21 @@ function missingEntries(actual: Record<string, unknown>, wanted: Record<string, 
 
 function describeStep(step: Step): string {
 	const [action] = Object.entries(step).filter(([key]) => key !== "name" && key !== "expect");
-	return action === undefined
-		? "expect"
-		: `${action[0]} ${typeof action[1] === "object" ? "" : String(action[1])}`.trim();
+	if (action === undefined) {
+		return "expect";
+	}
+	const value = action[1];
+	if (value === true || value === false || value === null) {
+		return `${action[0]} ${String(value)}`;
+	}
+	if (Array.isArray(value)) {
+		return action[0];
+	}
+	if (value !== undefined && value !== null && Object.getPrototypeOf(value) === Object.prototype) {
+		return action[0];
+	}
+	if (Number.isFinite(value) || value === `${value}`) {
+		return `${action[0]} ${String(value)}`;
+	}
+	return action[0];
 }

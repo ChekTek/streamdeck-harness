@@ -21,14 +21,23 @@ export type KeyImage = {
 	error: string | undefined;
 };
 
-const MIME_BY_EXTENSION: Record<string, string> = {
+const MIME_BY_EXTENSION = {
 	".svg": "image/svg+xml",
 	".png": "image/png",
 	".jpg": "image/jpeg",
 	".jpeg": "image/jpeg",
 	".gif": "image/gif",
 	".webp": "image/webp",
-};
+} as const;
+
+function mimeFor(extension: string): string {
+	for (const [suffix, mime] of Object.entries(MIME_BY_EXTENSION)) {
+		if (suffix === extension) {
+			return mime;
+		}
+	}
+	return "application/octet-stream";
+}
 
 /**
  * Resolves what a key is currently showing: a `setImage` override if the plugin set one,
@@ -87,7 +96,7 @@ function fromFile(project: PluginProject, relative: string, origin: "manifest" |
 	}
 
 	const extension = path.slice(path.lastIndexOf("."));
-	const mimeType = MIME_BY_EXTENSION[extension] ?? "application/octet-stream";
+	const mimeType = mimeFor(extension);
 	const bytes = readFileSync(path);
 	const isSvg = mimeType === "image/svg+xml";
 	const svg = isSvg ? bytes.toString("utf8") : undefined;

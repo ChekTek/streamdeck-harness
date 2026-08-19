@@ -1,7 +1,17 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 
-import type { Controller } from "../host/protocol.js";
+import {
+	errorMessage,
+	isJsonBoolean,
+	isJsonNumber,
+	isJsonObject,
+	isJsonString,
+	type JsonValue,
+	type JsonObject,
+	parseJsonValue,
+	type Controller,
+} from "../host/protocol.js";
 
 export type ManifestState = {
 	Image: string;
@@ -42,7 +52,6 @@ export type Manifest = {
 	PropertyInspectorPath?: string;
 	Nodejs?: { Version?: string; Debug?: string };
 	SDKVersion?: number;
-	[key: string]: unknown;
 };
 
 export type PluginProject = {
@@ -99,19 +108,14 @@ export function loadPlugin(input: string): PluginProject {
 		throw new Error(`no manifest.json in ${root}`);
 	}
 
-	let manifest: Manifest;
+	let parsed: JsonValue;
 	try {
-		manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as Manifest;
+		parsed = parseJsonValue(readFileSync(manifestPath, "utf8"));
 	} catch (cause) {
-		throw new Error(`manifest.json is not valid JSON: ${(cause as Error).message}`);
+		throw new Error(`manifest.json is not valid JSON: ${errorMessage(cause)}`);
 	}
 
-	if (typeof manifest.UUID !== "string" || manifest.UUID.length === 0) {
-		throw new Error("manifest.json has no UUID");
-	}
-	if (!Array.isArray(manifest.Actions)) {
-		throw new Error("manifest.json has no Actions array");
-	}
+	const manifest = parseManifest(parsed);
 
 	const expectedFolder = `${manifest.UUID}.sdPlugin`;
 	if (basename(root) !== expectedFolder) {
@@ -124,17 +128,137 @@ export function loadPlugin(input: string): PluginProject {
 	return { root, manifestPath, manifest, runtime, codePath };
 }
 
+function parseManifest(value: JsonValue): Manifest {
+	if (!isJsonObject(value) || !isJsonString(value.UUID) || value.UUID.length === 0) {
+		throw new Error("manifest.json has no UUID");
+	}
+	if (!isJsonString(value.Name) || !isJsonString(value.Version)) {
+		throw new Error("manifest.json is missing Name or Version");
+	}
+	if (!Array.isArray(value.Actions)) {
+		throw new Error("manifest.json has no Actions array");
+	}
+
+	const manifest: Manifest = {
+		Name: value.Name,
+		Version: value.Version,
+		UUID: value.UUID,
+		Actions: value.Actions.map((action, index) => parseManifestAction(action, index)),
+	};
+	if (isJsonString(value.Author)) {
+		manifest.Author = value.Author;
+	}
+	if (isJsonString(value.CodePath)) {
+		manifest.CodePath = value.CodePath;
+	}
+	if (isJsonString(value.CodePathMac)) {
+		manifest.CodePathMac = value.CodePathMac;
+	}
+	if (isJsonString(value.CodePathWin)) {
+		manifest.CodePathWin = value.CodePathWin;
+	}
+	if (isJsonString(value.PropertyInspectorPath)) {
+		manifest.PropertyInspectorPath = value.PropertyInspectorPath;
+	}
+	if (isJsonObject(value.Nodejs)) {
+		const nodejs: NonNullable<Manifest["Nodejs"]> = {};
+		if (isJsonString(value.Nodejs.Version)) {
+			nodejs.Version = value.Nodejs.Version;
+		}
+		if (isJsonString(value.Nodejs.Debug)) {
+			nodejs.Debug = value.Nodejs.Debug;
+		}
+		manifest.Nodejs = nodejs;
+	}
+	if (isJsonNumber(value.SDKVersion)) {
+		manifest.SDKVersion = value.SDKVersion;
+	}
+	return manifest;
+}
+
+function parseManifestAction(value: JsonValue, index: number): ManifestAction {
+	if (!isJsonObject(value) || !isJsonString(value.Name) || !isJsonString(value.UUID)) {
+		throw new Error(`manifest.json Actions[${index}] is missing Name or UUID`);
+	}
+	const action: ManifestAction = { Name: value.Name, UUID: value.UUID };
+	if (isJsonString(value.Icon)) {
+		action.Icon = value.Icon;
+	}
+	if (isJsonString(value.Tooltip)) {
+		action.Tooltip = value.Tooltip;
+	}
+	if (isJsonString(value.PropertyInspectorPath)) {
+		action.PropertyInspectorPath = value.PropertyInspectorPath;
+	}
+	if (Array.isArray(value.Controllers)) {
+		action.Controllers = value.Controllers.filter(
+			(controller): controller is Controller => controller === "Encoder" || controller === "Keypad",
+		);
+	}
+	if (Array.isArray(value.States)) {
+		action.States = value.States.filter((state) => isJsonObject(state)).map(parseManifestState);
+	}
+	if (isJsonBoolean(value.SupportedInMultiActions)) {
+		action.SupportedInMultiActions = value.SupportedInMultiActions;
+	}
+	if (isJsonBoolean(value.UserTitleEnabled)) {
+		action.UserTitleEnabled = value.UserTitleEnabled;
+	}
+	if (isJsonBoolean(value.VisibleInActionsList)) {
+		action.VisibleInActionsList = value.VisibleInActionsList;
+	}
+	return action;
+}
+
+function parseManifestState(value: JsonObject): ManifestState {
+	if (!isJsonString(value.Image)) {
+		return { Image: "" };
+	}
+	const state: ManifestState = { Image: value.Image };
+	if (isJsonString(value.MultiActionImage)) {
+		state.MultiActionImage = value.MultiActionImage;
+	}
+	if (isJsonString(value.Name)) {
+		state.Name = value.Name;
+	}
+	if (isJsonString(value.Title)) {
+		state.Title = value.Title;
+	}
+	if (isJsonBoolean(value.ShowTitle)) {
+		state.ShowTitle = value.ShowTitle;
+	}
+	if (isJsonString(value.TitleColor)) {
+		state.TitleColor = value.TitleColor;
+	}
+	if (isJsonString(value.TitleAlignment)) {
+		state.TitleAlignment = value.TitleAlignment;
+	}
+	if (isJsonString(value.FontFamily)) {
+		state.FontFamily = value.FontFamily;
+	}
+	if (isJsonNumber(value.FontSize)) {
+		state.FontSize = value.FontSize;
+	}
+	if (isJsonString(value.FontStyle)) {
+		state.FontStyle = value.FontStyle;
+	}
+	if (isJsonBoolean(value.FontUnderline)) {
+		state.FontUnderline = value.FontUnderline;
+	}
+	return state;
+}
+
 function resolveCodePath(root: string, manifest: Manifest, runtime: "native" | "node"): string {
-	const platformKey = process.platform === "win32" ? "CodePathWin" : "CodePathMac";
-	const relative = manifest[platformKey] ?? manifest.CodePath;
+	const platformPath = process.platform === "win32" ? manifest.CodePathWin : manifest.CodePathMac;
+	const relative = platformPath ?? manifest.CodePath;
 	if (relative === undefined) {
-		throw new Error(`manifest.json declares neither CodePath nor ${platformKey}`);
+		throw new Error(`manifest.json declares neither CodePath nor ${process.platform === "win32" ? "CodePathWin" : "CodePathMac"}`);
 	}
 
 	const absolute = join(root, relative);
 	if (!existsSync(absolute)) {
 		const hint = runtime === "node" ? "run the plugin's build script first" : "build the binary first";
-		throw new Error(`${platformKey ?? "CodePath"} points at a missing file: ${absolute} (${hint})`);
+		throw new Error(`CodePath points at a missing file: ${absolute} (${hint})`);
 	}
 	return absolute;
 }

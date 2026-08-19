@@ -1,29 +1,32 @@
 import { connect, type Socket } from "node:net";
 
 import { socketPath } from "../daemon/paths.js";
-import { readFrames, type RpcResponse, writeFrame } from "../daemon/rpc.js";
+import { isRpcResponse, readFrames, writeFrame } from "../daemon/rpc.js";
+import { type JsonObject, type JsonValue } from "../host/protocol.js";
 
 /** Short-lived connection to a session daemon. One per CLI invocation. */
 export class DaemonClient {
 	readonly #socket: Socket;
-	readonly #pending = new Map<number, { resolve: (value: unknown) => void; reject: (reason: Error) => void }>();
+	readonly #pending = new Map<number, { resolve: (value: JsonValue) => void; reject: (reason: Error) => void }>();
 	#nextId = 1;
 
 	private constructor(socket: Socket) {
 		this.#socket = socket;
 		readFrames(socket, (value) => {
-			const response = value as RpcResponse;
-			const pending = this.#pending.get(response.id);
+			if (!isRpcResponse(value)) {
+				return;
+			}
+			const pending = this.#pending.get(value.id);
 			if (pending === undefined) {
 				return;
 			}
-			this.#pending.delete(response.id);
-			if (response.ok) {
-				pending.resolve(response.result);
+			this.#pending.delete(value.id);
+			if (value.ok) {
+				pending.resolve(value.result);
 			} else {
-				const error = new Error(response.error.message);
-				if (response.error.stack !== undefined) {
-					error.stack = response.error.stack;
+				const error = new Error(value.error.message);
+				if (value.error.stack !== undefined) {
+					error.stack = value.error.stack;
 				}
 				pending.reject(error);
 			}
@@ -53,10 +56,10 @@ export class DaemonClient {
 		return new DaemonClient(socket);
 	}
 
-	public async call<T = unknown>(method: string, params: Record<string, unknown> = {}): Promise<T> {
+	public async call(method: string, params: JsonObject = {}): Promise<JsonValue> {
 		const id = this.#nextId++;
-		return new Promise<T>((resolve, reject) => {
-			this.#pending.set(id, { resolve: resolve as (value: unknown) => void, reject });
+		return new Promise((resolve, reject) => {
+			this.#pending.set(id, { resolve, reject });
 			writeFrame(this.#socket, { id, method, params });
 		});
 	}

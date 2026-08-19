@@ -5,6 +5,7 @@ import { findPluginRoot } from "../../plugin/manifest.js";
 import { formatFindings, type LintResult, lintSvg } from "../../render/svg-tiny.js";
 import { type Args, flagBool } from "../args.js";
 import { emit, fail } from "../output.js";
+import { errorMessage } from "../../host/protocol.js";
 
 function collect(target: string, into: string[]): void {
 	const stat = statSync(target);
@@ -36,7 +37,7 @@ export function lintCommand(args: Args): void {
 			// A plugin root is the common case; lint its shipped artwork rather than its source tree.
 			collect(statSync(target).isDirectory() ? tryPluginImages(target) : target, files);
 		} catch (cause) {
-			fail((cause as Error).message);
+			fail(errorMessage(cause));
 		}
 	}
 
