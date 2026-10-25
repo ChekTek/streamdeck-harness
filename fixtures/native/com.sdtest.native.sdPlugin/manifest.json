@@ -1,0 +1,31 @@
+{
+    "Name": "sdtest native fixture",
+    "Version": "1.0.0.0",
+    "Author": "sdtest",
+    "Description": "A plugin with no Nodejs block, launched as a native binary. Exercises the harness's native path: direct spawn, no inspector, RSS sampling, and the language-agnostic after-disappear check.",
+    "UUID": "com.sdtest.native",
+    "Category": "sdtest",
+    "Icon": "imgs/icon",
+    "CodePathMac": "bin/plugin",
+    "SDKVersion": 3,
+    "Software": { "MinimumVersion": "6.5" },
+    "OS": [{ "Platform": "mac", "MinimumVersion": "12" }],
+    "Actions": [
+        {
+            "Name": "Counter",
+            "UUID": "com.sdtest.native.counter",
+            "Icon": "imgs/icon",
+            "Tooltip": "Increments a title on each press.",
+            "Controllers": ["Keypad"],
+            "States": [{ "Image": "imgs/icon" }]
+        },
+        {
+            "Name": "Chatty leak",
+            "UUID": "com.sdtest.native.chatty-leak",
+            "Icon": "imgs/icon",
+            "Tooltip": "Keeps drawing to a key after it has disappeared.",
+            "Controllers": ["Keypad"],
+            "States": [{ "Image": "imgs/icon" }]
+        }
+    ]
+}
