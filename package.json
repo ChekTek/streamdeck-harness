@@ -34,6 +34,7 @@
         "@types/node": "~20.15.0",
         "@types/sax": "^1.2.7",
         "@types/ws": "^8.5.13",
+        "eslint": "^9.39.5",
         "oxlint": "1.79.0",
         "typescript": "^5.7.0"
     }

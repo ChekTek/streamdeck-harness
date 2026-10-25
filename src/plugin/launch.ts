@@ -72,6 +72,7 @@ export class PluginProcess extends EventEmitter {
 			cwd: project.root,
 			env: { ...process.env, ...options.env },
 			stdio: ["ignore", "pipe", "pipe"],
+			windowsHide: true,
 		});
 
 		this.#pipe("stdout", this.#child.stdout);

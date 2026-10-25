@@ -96,7 +96,11 @@ export async function launchSession(session: string, options: LaunchOptions): Pr
 	};
 	writeFileSync(`${directory}/start.json`, JSON.stringify(start, null, 2));
 
-	const child = spawn(process.execPath, [DAEMON_ENTRY, session], { detached: true, stdio: "ignore" });
+	const child = spawn(process.execPath, [DAEMON_ENTRY, session], {
+		detached: true,
+		stdio: "ignore",
+		windowsHide: true,
+	});
 	child.unref();
 
 	return waitForMeta(session, options.startTimeoutMs ?? 30_000);
