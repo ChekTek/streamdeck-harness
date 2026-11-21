@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { type ChildProcess, spawn } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
@@ -96,14 +96,29 @@ export async function launchSession(session: string, options: LaunchOptions): Pr
 	};
 	writeFileSync(`${directory}/start.json`, JSON.stringify(start, null, 2));
 
-	const child = spawn(process.execPath, [DAEMON_ENTRY, session], {
-		detached: true,
-		stdio: "ignore",
-		windowsHide: true,
-	});
-	child.unref();
+	spawnDaemon(session).unref();
 
 	return waitForMeta(session, options.startTimeoutMs ?? 30_000);
+}
+
+/**
+ * Starts the daemon so it outlives the CLI. On Windows `detached: true` leaves it with no
+ * console at all, so every console program below it (Chromium, taskkill, PowerShell) opens
+ * a visible terminal. `start /b` instead runs it in the hidden console of a short-lived
+ * `cmd.exe`, outside the CLI's kill-on-exit job, and everything the daemon spawns inherits
+ * that console.
+ */
+function spawnDaemon(session: string): ChildProcess {
+	if (process.platform !== "win32") {
+		return spawn(process.execPath, [DAEMON_ENTRY, session], { detached: true, stdio: "ignore" });
+	}
+
+	const command = `start "" /b "${process.execPath}" "${DAEMON_ENTRY}" ${session}`;
+	return spawn(process.env.ComSpec ?? "cmd.exe", ["/d", "/s", "/c", `"${command}"`], {
+		stdio: "ignore",
+		windowsHide: true,
+		windowsVerbatimArguments: true,
+	});
 }
 
 export async function startCommand(args: Args): Promise<void> {
