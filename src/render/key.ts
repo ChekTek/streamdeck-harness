@@ -80,13 +80,22 @@ function fromDataUri(uri: string): KeyImage {
 
 	return {
 		origin: "setImage",
-		dataUri: uri,
+		dataUri: isSvg ? svgDataUri(decoded) : uri,
 		path: undefined,
 		mimeType,
 		svg: isSvg ? decoded : undefined,
 		lint: isSvg ? lintSvg(decoded, "setImage payload") : undefined,
 		error: undefined,
 	};
+}
+
+/**
+ * Re-encodes decoded SVG markup for the screenshot page. Stream Deck decodes the payload and
+ * renders the markup, so a raw `#` in a colour is drawn; a browser would instead read it as
+ * the start of a URL fragment and drop the rest of the image.
+ */
+function svgDataUri(svg: string): string {
+	return `data:image/svg+xml;base64,${Buffer.from(svg, "utf8").toString("base64")}`;
 }
 
 function fromFile(project: PluginProject, relative: string, origin: "manifest" | "setImage"): KeyImage {
