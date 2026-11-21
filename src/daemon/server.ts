@@ -2,7 +2,7 @@ import { existsSync, unlinkSync, writeFileSync } from "node:fs";
 import { createServer, type Server, type Socket } from "node:net";
 
 import { compactJson, errorMessage, type JsonValue } from "../host/protocol.js";
-import { type MethodContext, methodFor } from "./methods.js";
+import { isConcurrent, type MethodContext, methodFor } from "./methods.js";
 import { metaPath, socketPath } from "./paths.js";
 import { parseRpcRequest, readFrames, writeFrame } from "./rpc.js";
 import type { Session } from "./session.js";
@@ -23,6 +23,8 @@ export class Daemon {
 	#server: Server | undefined;
 	readonly #connections = new Set<Socket>();
 	#lastRequestAt = Date.now();
+	#inFlight = 0;
+	#queue: Promise<undefined> = Promise.resolve(undefined);
 	#idleTimer: NodeJS.Timeout | undefined;
 	#closing = false;
 
@@ -49,7 +51,7 @@ export class Daemon {
 		});
 
 		this.#idleTimer = setInterval(() => {
-			if (Date.now() - this.#lastRequestAt > this.#idleTimeoutMs) {
+			if (this.#inFlight === 0 && Date.now() - this.#lastRequestAt > this.#idleTimeoutMs) {
 				void this.shutdown("idle");
 			}
 		}, 5_000);
@@ -90,8 +92,11 @@ export class Daemon {
 			shutdown: (reason) => this.shutdown(reason),
 		};
 
+		const run = async (): Promise<JsonValue> => handler(context, request.params);
+
+		this.#inFlight++;
 		try {
-			const result = await handler(context, request.params);
+			const result = await (isConcurrent(request.method) ? run() : this.#exclusive(run));
 			writeFrame(socket, compactJson({ id: request.id, ok: true, result }));
 		} catch (cause) {
 			const error = compactJson({ message: errorMessage(cause) });
@@ -99,6 +104,27 @@ export class Daemon {
 				error.stack = cause.stack;
 			}
 			writeFrame(socket, compactJson({ id: request.id, ok: false, error }));
+		} finally {
+			this.#inFlight--;
+			this.#lastRequestAt = Date.now();
+		}
+	}
+
+	/**
+	 * Runs `task` after every earlier exclusive request has finished. Requests arrive from
+	 * separate CLI processes, so two that change the session would otherwise interleave.
+	 */
+	async #exclusive(task: () => Promise<JsonValue>): Promise<JsonValue> {
+		const previous = this.#queue;
+		let release = (): void => undefined;
+		this.#queue = new Promise((resolve) => {
+			release = (): void => resolve(undefined);
+		});
+		await previous;
+		try {
+			return await task();
+		} finally {
+			release();
 		}
 	}
 

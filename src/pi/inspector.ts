@@ -89,20 +89,25 @@ export class Inspector {
 			payload,
 		});
 
-		const browser = await getBrowser();
-		const page = await browser.newPage({
-			viewport: { width: options.width ?? DEFAULT_PI_WIDTH, height: options.height ?? DEFAULT_PI_HEIGHT },
-			deviceScaleFactor: 1,
-			colorScheme: "dark",
-		});
+		let page: Page;
+		try {
+			const browser = await getBrowser();
+			page = await browser.newPage({
+				viewport: { width: options.width ?? DEFAULT_PI_WIDTH, height: options.height ?? DEFAULT_PI_HEIGHT },
+				deviceScaleFactor: 1,
+				colorScheme: "dark",
+			});
+		} catch (cause) {
+			await server.close();
+			throw cause;
+		}
 
 		const inspector = new Inspector({ context: instance.context, url, page, server });
 		page.on("console", (message) => inspector.consoleLines.push({ type: message.type(), text: message.text() }));
 		page.on("pageerror", (error) => inspector.pageErrors.push(error.message));
 
-		await page.addInitScript(bootstrapScript(options.hostPort, instance.context, options.info, actionInfo));
-
 		try {
+			await page.addInitScript(bootstrapScript(options.hostPort, instance.context, options.info, actionInfo));
 			await page.goto(url, { waitUntil: "domcontentloaded" });
 		} catch (cause) {
 			await inspector.close();

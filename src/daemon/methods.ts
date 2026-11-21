@@ -558,6 +558,34 @@ export const methods = {
 	},
 } satisfies { [name: string]: Method };
 
+/** Methods that only read session state (or end it), so they need not wait behind one that changes it. */
+const CONCURRENT_METHODS: readonly string[] = [
+	"info",
+	"close",
+	"actions",
+	"key",
+	"screenshot",
+	"getSettings",
+	"getGlobalSettings",
+	"piSnapshot",
+	"piFields",
+	"piScreenshot",
+	"piConsole",
+	"events",
+	"violations",
+	"waitQuiet",
+	"logs",
+	"output",
+] satisfies Array<keyof typeof methods>;
+
+/**
+ * Whether `name` may run alongside other requests. Everything else changes the session and
+ * is run one at a time.
+ */
+export function isConcurrent(name: string): boolean {
+	return CONCURRENT_METHODS.includes(name);
+}
+
 export function methodFor(name: string): Method | undefined {
 	for (const [key, method] of Object.entries(methods)) {
 		if (key === name) {

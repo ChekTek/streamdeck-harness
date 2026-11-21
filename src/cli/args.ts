@@ -9,6 +9,21 @@ export type Args = {
 
 const DEFAULT_SESSION = "default";
 
+/** Switches that take no value, so they never consume the argument after them. `--no-<name>` sets one false. */
+const BOOLEAN_FLAGS = new Set([
+	"all",
+	"appear",
+	"full-page",
+	"heap-snapshot",
+	"inspect",
+	"json",
+	"keep",
+	"multi-action",
+	"raw",
+	"since-start",
+	"strict",
+]);
+
 function isFlagString(value: boolean | string | undefined): value is string {
 	return typeof value === "string";
 }
@@ -46,6 +61,19 @@ export function parseArgs(argv: string[]): Args {
 				continue;
 			}
 			const next = argv[index + 1];
+			if (body.startsWith("no-") && BOOLEAN_FLAGS.has(body.slice(3))) {
+				flags.set(body.slice(3), false);
+				continue;
+			}
+			if (BOOLEAN_FLAGS.has(body)) {
+				if (next === "true" || next === "false") {
+					flags.set(body, next);
+					index++;
+				} else {
+					flags.set(body, true);
+				}
+				continue;
+			}
 			if (next !== undefined && !next.startsWith("-")) {
 				flags.set(body, next);
 				index++;

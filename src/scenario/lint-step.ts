@@ -30,6 +30,9 @@ export function lintPath(target: string): LintStepReport {
 		}
 	};
 	walk(root);
+	if (files.length === 0) {
+		throw new Error(`no .svg files found under: ${root}`);
+	}
 
 	const results = files.map((file) => lintSvg(readFileSync(file, "utf8"), relative(process.cwd(), file)));
 	return {

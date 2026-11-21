@@ -1,5 +1,6 @@
+import { createHash } from "node:crypto";
 import { homedir, tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 
 /** Root for all session state. Overridable so tests never touch the user's real sessions. */
 export function stateRoot(): string {
@@ -24,14 +25,22 @@ export function artifactsDir(session: string): string {
 
 /**
  * Address the daemon listens on. Unix socket paths are capped at ~104 bytes on macOS, so
- * long session directories fall back to a short path under the temp directory.
+ * long session directories fall back to a short path under the temp directory, named by a
+ * digest of the session directory so two state roots never share a socket.
  */
 export function socketPath(session: string): string {
 	if (process.platform === "win32") {
 		return `\\\\.\\pipe\\sdtest-${session}`;
 	}
 	const preferred = join(sessionDir(session), "sock");
-	return Buffer.byteLength(preferred) < 100 ? preferred : join(tmpdir(), `sdtest-${session}.sock`);
+	if (Buffer.byteLength(preferred) < 100) {
+		return preferred;
+	}
+	const digest = createHash("sha256")
+		.update(resolve(sessionDir(session)))
+		.digest("hex")
+		.slice(0, 16);
+	return join(tmpdir(), `sdtest-${digest}.sock`);
 }
 
 /** Whether `session` is safe to use as a single directory name under the state root. */

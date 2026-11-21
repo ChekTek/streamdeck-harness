@@ -153,10 +153,50 @@ export function parseScenario(value: JsonValue, source: string): Scenario {
 	return scenario;
 }
 
+const STEP_KEYS = [
+	"name",
+	"add",
+	"as",
+	"settings",
+	"column",
+	"row",
+	"state",
+	"title",
+	"remove",
+	"appear",
+	"disappear",
+	"press",
+	"hold",
+	"settle",
+	"screenshot",
+	"shotName",
+	"size",
+	"setSettings",
+	"ref",
+	"setGlobalSettings",
+	"setSecrets",
+	"piOpen",
+	"piSet",
+	"value",
+	"piClick",
+	"piScreenshot",
+	"piClose",
+	"waitQuiet",
+	"checkLifecycle",
+	"cycles",
+	"warmup",
+	"interact",
+	"expectVerdict",
+	"lintSvg",
+	"allowWarnings",
+	"expect",
+] as const satisfies Array<keyof Step>;
+
 function parseStep(value: JsonValue, source: string): Step {
 	if (!isJsonObject(value)) {
 		throw new Error(`${source}: expected a mapping`);
 	}
+	rejectUnknownKeys(value, STEP_KEYS, source);
 
 	const step: Step = {};
 	assignString(step, value, "name", source);

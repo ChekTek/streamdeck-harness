@@ -84,30 +84,70 @@ export type LaunchOptions = {
 export async function launchSession(session: string, options: LaunchOptions): Promise<Meta> {
 	validateSessionName(session);
 
-	const existing = readMeta(session);
-	if (existing?.status === "ready" && isAlive(existing.pid)) {
-		throw new Error(
-			`session "${session}" is already running (pid ${String(existing.pid)}). Close it first: sdtest -s=${session} close`,
-		);
-	}
-
 	const directory = sessionDir(session);
 	mkdirSync(directory, { recursive: true });
-	rmSync(metaPath(session), { force: true });
+	const lock = acquireStartLock(session);
 
-	const start = {
-		pluginPath: options.pluginPath,
-		devices: options.devices ?? ["stream-deck"],
-		idleTimeoutMs: options.idleTimeoutMs ?? 15 * 60_000,
-		nodePath: options.nodePath,
-		inspect: options.inspect === false ? false : undefined,
-		registerTimeoutMs: options.registerTimeoutMs,
-	};
-	writeFileSync(`${directory}/start.json`, JSON.stringify(start, null, 2));
+	try {
+		const existing = readMeta(session);
+		if (existing?.status === "ready" && isAlive(existing.pid)) {
+			throw new Error(
+				`session "${session}" is already running (pid ${String(existing.pid)}). Close it first: sdtest -s=${session} close`,
+			);
+		}
+		rmSync(metaPath(session), { force: true });
 
-	spawnDaemon(session).unref();
+		const start = {
+			pluginPath: options.pluginPath,
+			devices: options.devices ?? ["stream-deck"],
+			idleTimeoutMs: options.idleTimeoutMs ?? 15 * 60_000,
+			nodePath: options.nodePath,
+			inspect: options.inspect === false ? false : undefined,
+			registerTimeoutMs: options.registerTimeoutMs,
+		};
+		writeFileSync(`${directory}/start.json`, JSON.stringify(start, null, 2));
 
-	return waitForMeta(session, options.startTimeoutMs ?? 30_000);
+		spawnDaemon(session).unref();
+
+		return await waitForMeta(session, options.startTimeoutMs ?? 30_000);
+	} finally {
+		rmSync(lock, { force: true });
+	}
+}
+
+/**
+ * Claims `session` for this launcher until its daemon reports ready or failed, so two
+ * concurrent starts cannot both spawn a plugin under one name. A lock left by a launcher
+ * that has since died is taken over.
+ */
+function acquireStartLock(session: string): string {
+	const path = join(sessionDir(session), "start.lock");
+	for (let attempt = 0; attempt < 2; attempt++) {
+		try {
+			writeFileSync(path, String(process.pid), { flag: "wx" });
+			return path;
+		} catch (cause) {
+			if (!(cause instanceof Error) || !("code" in cause) || cause.code !== "EEXIST") {
+				throw cause;
+			}
+		}
+
+		const holder = readLockHolder(path);
+		if (isAlive(holder)) {
+			throw new Error(`session "${session}" is already being started by another sdtest (pid ${String(holder)})`);
+		}
+		rmSync(path, { force: true });
+	}
+	throw new Error(`session "${session}" is already being started by another sdtest`);
+}
+
+function readLockHolder(path: string): number | undefined {
+	try {
+		const pid = Number(readFileSync(path, "utf8"));
+		return Number.isInteger(pid) ? pid : undefined;
+	} catch {
+		return undefined;
+	}
 }
 
 /**

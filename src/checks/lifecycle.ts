@@ -2,6 +2,7 @@ import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import type { Session } from "../daemon/session.js";
+import type { ActionInstance } from "../host/action.js";
 import type { JsonObject } from "../host/protocol.js";
 import { InspectorClient, readRss, summariseHeapSnapshot } from "../plugin/inspector-client.js";
 
@@ -88,6 +89,7 @@ export async function checkLifecycle(session: Session, options: LifecycleOptions
 			: await InspectorClient.connect(session.inspectorUrl).catch(() => undefined);
 	const measurement = inspector === undefined ? "rss" : "inspector";
 	const startSeq = session.host.recorder.nextSeq;
+	let added: ActionInstance | undefined;
 
 	try {
 		// A leaking action from an earlier check keeps sending frames forever, which would be
@@ -95,6 +97,7 @@ export async function checkLifecycle(session: Session, options: LifecycleOptions
 		const otherLiveActions = session.host.allActions().filter((candidate) => candidate.visible).length;
 
 		const instance = session.host.addAction({ uuid: options.uuid, settings: options.settings, appear: false });
+		added = instance;
 		const samples: Sample[] = [];
 		const total = options.warmup + options.cycles;
 		let settleTimeouts = 0;
@@ -168,9 +171,11 @@ export async function checkLifecycle(session: Session, options: LifecycleOptions
 			report.topRetainers = summariseHeapSnapshot(json);
 		}
 
-		session.host.removeAction(instance);
 		return report;
 	} finally {
+		if (added !== undefined) {
+			session.host.removeAction(added);
+		}
 		inspector?.close();
 	}
 }

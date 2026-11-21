@@ -156,7 +156,7 @@ export function keyHtml(instance: ActionInstance, image: KeyImage, size: number)
   }
 </style>
 <div id="key">
-  ${image.dataUri === undefined ? `<div id="missing">${escapeHtml(image.error ?? "no image")}</div>` : `<img src="${image.dataUri}" alt="">`}
+  ${image.dataUri === undefined ? `<div id="missing">${escapeHtml(image.error ?? "no image")}</div>` : `<img src="${escapeHtml(image.dataUri)}" alt="">`}
   ${showTitle ? `<div id="title">${escapeHtml(title)}</div>` : ""}
 </div>`;
 }
