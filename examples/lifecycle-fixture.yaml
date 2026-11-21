@@ -1,0 +1,31 @@
+# Proves the lifecycle check detects what it claims to, using the bundled fixture plugin.
+# Each action leaks in a different way, and one does not leak at all.
+#
+#   sdtest run examples/lifecycle-fixture.yaml
+name: Lifecycle check self-test
+plugin: ../fixtures/leaky
+
+steps:
+  - name: A correctly cleaned-up timer passes
+    checkLifecycle: com.sdtest.fixture.clean
+    cycles: 6
+    interact: none
+    expectVerdict: pass
+
+  - name: A silent uncleared timer is caught by the handle count
+    checkLifecycle: com.sdtest.fixture.timer-leak
+    cycles: 6
+    interact: none
+    expectVerdict: leak
+
+  - name: A retained Buffer is caught in external memory
+    checkLifecycle: com.sdtest.fixture.heap-leak
+    cycles: 6
+    interact: none
+    expectVerdict: leak
+
+  - name: A retained JS array is caught in the V8 heap
+    checkLifecycle: com.sdtest.fixture.js-heap-leak
+    cycles: 6
+    interact: none
+    expectVerdict: leak

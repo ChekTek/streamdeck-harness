@@ -1,0 +1,59 @@
+{
+    "Name": "sdtest fixture",
+    "Version": "1.0.0.0",
+    "Author": "sdtest",
+    "Description": "Actions with known-good and known-bad onWillAppear/onWillDisappear behaviour, used to prove the lifecycle check detects what it claims to.",
+    "UUID": "com.sdtest.fixture",
+    "Category": "sdtest",
+    "Icon": "imgs/icon",
+    "CodePath": "bin/plugin.js",
+    "SDKVersion": 3,
+    "Software": { "MinimumVersion": "6.5" },
+    "OS": [
+        { "Platform": "mac", "MinimumVersion": "12" },
+        { "Platform": "windows", "MinimumVersion": "10" }
+    ],
+    "Nodejs": { "Version": "20" },
+    "Actions": [
+        {
+            "Name": "Clean",
+            "UUID": "com.sdtest.fixture.clean",
+            "Icon": "imgs/icon",
+            "Tooltip": "Starts a timer in willAppear and clears it in willDisappear.",
+            "Controllers": ["Keypad"],
+            "States": [{ "Image": "imgs/icon" }]
+        },
+        {
+            "Name": "Timer leak",
+            "UUID": "com.sdtest.fixture.timer-leak",
+            "Icon": "imgs/icon",
+            "Tooltip": "Starts a silent timer in willAppear and never clears it. Only the handle count reveals it.",
+            "Controllers": ["Keypad"],
+            "States": [{ "Image": "imgs/icon" }]
+        },
+        {
+            "Name": "Chatty leak",
+            "UUID": "com.sdtest.fixture.chatty-leak",
+            "Icon": "imgs/icon",
+            "Tooltip": "Keeps calling setImage for a key that has already disappeared.",
+            "Controllers": ["Keypad"],
+            "States": [{ "Image": "imgs/icon" }]
+        },
+        {
+            "Name": "JS heap leak",
+            "UUID": "com.sdtest.fixture.js-heap-leak",
+            "Icon": "imgs/icon",
+            "Tooltip": "Retains a large JS array per appear and never releases it.",
+            "Controllers": ["Keypad"],
+            "States": [{ "Image": "imgs/icon" }]
+        },
+        {
+            "Name": "Heap leak",
+            "UUID": "com.sdtest.fixture.heap-leak",
+            "Icon": "imgs/icon",
+            "Tooltip": "Retains a large buffer per appear and never releases it.",
+            "Controllers": ["Keypad"],
+            "States": [{ "Image": "imgs/icon" }]
+        }
+    ]
+}
