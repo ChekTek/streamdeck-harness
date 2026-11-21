@@ -14,6 +14,9 @@ import {
 
 const execFileAsync = promisify(execFile);
 
+const DISCONNECTED =
+	"the plugin's inspector connection closed, so the plugin process has probably exited. Check: sdtest output";
+
 type Pending = { resolve: (value: JsonValue) => void; reject: (reason: Error) => void };
 
 export type MemoryUsage = {
@@ -71,6 +74,13 @@ export class InspectorClient {
 			} else {
 				pending.resolve(message.result ?? null);
 			}
+		});
+
+		socket.on("close", () => {
+			for (const pending of this.#pending.values()) {
+				pending.reject(new Error(DISCONNECTED));
+			}
+			this.#pending.clear();
 		});
 	}
 
@@ -173,6 +183,9 @@ export class InspectorClient {
 	}
 
 	public async send(method: string, params: JsonObject = {}): Promise<JsonValue> {
+		if (this.#socket.readyState !== WebSocket.OPEN) {
+			throw new Error(DISCONNECTED);
+		}
 		const id = this.#nextId++;
 		return new Promise((resolve, reject) => {
 			this.#pending.set(id, { resolve, reject });

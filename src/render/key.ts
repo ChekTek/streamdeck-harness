@@ -3,6 +3,7 @@ import { basename } from "node:path";
 
 import type { ActionInstance } from "../host/action.js";
 import { type PluginProject, resolveImagePath } from "../plugin/manifest.js";
+import { parseDataUri } from "./data-uri.js";
 import { type LintResult, lintSvg } from "./svg-tiny.js";
 
 export type KeyImage = {
@@ -69,13 +70,12 @@ function blank(error?: string): KeyImage {
 }
 
 function fromDataUri(uri: string): KeyImage {
-	const match = /^data:([^;,]+)(;base64)?,(.*)$/s.exec(uri);
-	if (match === null) {
+	const parsed = parseDataUri(uri);
+	if (parsed === undefined) {
 		return { ...blank("setImage payload is not a valid data URI"), origin: "setImage", dataUri: uri };
 	}
 
-	const [, mimeType = "", base64, body = ""] = match;
-	const decoded = base64 === undefined ? decodeURIComponent(body) : Buffer.from(body, "base64").toString("utf8");
+	const { mimeType, text: decoded } = parsed;
 	const isSvg = mimeType.includes("svg");
 
 	return {

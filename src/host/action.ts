@@ -46,7 +46,8 @@ export class ActionInstance {
 
 	public state = 0;
 
-	public title: string;
+	/** Title set by the user or by `setTitle`; undefined falls back to the manifest state's title. */
+	public title: string | undefined;
 
 	/** Per-state title override set via `setTitle`; index 0 is used for single-state actions. */
 	public readonly titleByState = new Map<number, string>();
@@ -74,7 +75,7 @@ export class ActionInstance {
 		this.coordinates = options.coordinates;
 		this.isInMultiAction = options.isInMultiAction;
 		this.definition = options.definition;
-		this.title = options.title ?? "";
+		this.title = options.title;
 		this.state = options.state ?? 0;
 	}
 
@@ -82,9 +83,9 @@ export class ActionInstance {
 		return this.imageByState.get(this.state);
 	}
 
-	/** Effective title for the current state, preferring a `setTitle` override. */
+	/** Effective title for the current state: a `setTitle` override, else the manifest state's default. */
 	public get effectiveTitle(): string {
-		return this.titleByState.get(this.state) ?? this.title;
+		return this.titleByState.get(this.state) ?? this.title ?? this.manifestState?.Title ?? "";
 	}
 
 	public get manifestState(): ManifestState | undefined {

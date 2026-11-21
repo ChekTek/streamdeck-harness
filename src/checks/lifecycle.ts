@@ -65,6 +65,9 @@ export const LIFECYCLE_DEFAULTS = {
 	maxHandlesPerCycle: 0,
 } as const;
 
+/** Fewest measured cycles a growth slope can be fitted to. */
+const MIN_TREND_CYCLES = 3;
+
 /**
  * Drives an action through repeated appear/interact/disappear cycles and reports whether it
  * gives back what it took.
@@ -116,7 +119,7 @@ export async function checkLifecycle(session: Session, options: LifecycleOptions
 		const kept = samples.slice(options.warmup);
 		const fitOf = (pick: (entry: Sample) => number | undefined): { slope: number; stdError: number } | undefined => {
 			const series = kept.map(pick).filter((value): value is number => value !== undefined);
-			return series.length === kept.length && kept.length >= 3 ? fitSlope(series) : undefined;
+			return series.length === kept.length && kept.length >= MIN_TREND_CYCLES ? fitSlope(series) : undefined;
 		};
 
 		const retainedFit = fitOf((entry) => entry.retained);
@@ -308,6 +311,16 @@ function verdictFor(report: LifecycleReport, options: LifecycleOptions): Lifecyc
 				`RSS grows ${formatBytes(rssSlope)} per cycle, but RSS includes allocator behaviour the harness cannot force to settle. Confirm by hand.`,
 			);
 		}
+	}
+
+	const memorySlope = report.measurement === "inspector" ? report.retainedBytesPerCycle : report.rssBytesPerCycle;
+	if (memorySlope === undefined && verdict === "pass") {
+		verdict = "inconclusive";
+		reasons.push(
+			report.cycles < MIN_TREND_CYCLES
+				? `only ${report.cycles} cycle(s) were measured and a growth trend needs at least ${MIN_TREND_CYCLES}, so a leak cannot be ruled out. Re-run with more --cycles.`
+				: "memory could not be read on every cycle (the plugin may have exited), so a leak cannot be ruled out. Check: sdtest output",
+		);
 	}
 
 	if (report.settleTimeouts > 0) {

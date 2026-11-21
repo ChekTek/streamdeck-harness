@@ -64,9 +64,14 @@ export class StaticServer {
 
 	public async listen(): Promise<number> {
 		const server = createServer((request, response) => {
-			const requestUrl = new URL(request.url ?? "/", "http://127.0.0.1");
-			const decoded = decodeURIComponent(requestUrl.pathname);
-			const target = join(this.#root, normalize(decoded));
+			let target: string;
+			try {
+				const { pathname } = new URL(request.url ?? "/", "http://127.0.0.1");
+				target = join(this.#root, normalize(decodeURIComponent(pathname)));
+			} catch {
+				response.writeHead(400).end("bad request");
+				return;
+			}
 
 			// Reject anything that escapes the plugin folder.
 			if (target !== this.#root && !target.startsWith(this.#root + sep)) {

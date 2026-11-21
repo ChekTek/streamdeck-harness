@@ -1,4 +1,5 @@
 import { isAbsolute, resolve } from "node:path";
+import { isDeepStrictEqual } from "node:util";
 
 import type { DaemonClient } from "../cli/client.js";
 import {
@@ -370,7 +371,7 @@ function check(failures: string[], condition: boolean, message: string): void {
 
 function missingEntries(actual: JsonObject, wanted: JsonObject, label: string): string[] {
 	return Object.entries(wanted)
-		.filter(([key, value]) => JSON.stringify(actual[key]) !== JSON.stringify(value))
+		.filter(([key, value]) => !isDeepStrictEqual(actual[key], value))
 		.map(([key, value]) => `${label}.${key} is ${JSON.stringify(actual[key])}, expected ${JSON.stringify(value)}`);
 }
 

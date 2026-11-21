@@ -272,18 +272,19 @@ function bootstrapScript(hostPort: number, uuid: string, info: RegistrationInfo,
   let implementation;
   let invoked = false;
 
+  const failed = (error) => {
+    window.__sdtestConnectError = String(error);
+    console.error("connectElgatoStreamDeckSocket failed: " + String(error));
+  };
+
   const invoke = () => {
     if (invoked || implementation == null) return;
     invoked = true;
     try {
       const result = implementation(...args);
-      Promise.resolve(result).then(
-        () => { window.__sdtestConnected = true; },
-        (error) => { window.__sdtestConnectError = String(error); },
-      );
-      window.__sdtestConnected = true;
+      Promise.resolve(result).then(() => { window.__sdtestConnected = true; }, failed);
     } catch (error) {
-      window.__sdtestConnectError = String(error);
+      failed(error);
     }
   };
 

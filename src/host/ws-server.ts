@@ -3,6 +3,7 @@ import type { AddressInfo } from "node:net";
 import { type WebSocket, WebSocketServer } from "ws";
 
 import { findAction, type Manifest } from "../plugin/manifest.js";
+import { parseDataUri } from "../render/data-uri.js";
 import { lintSvg } from "../render/svg-tiny.js";
 import { ActionInstance } from "./action.js";
 import { type Device, newIdentifier } from "./device.js";
@@ -129,7 +130,7 @@ export class MockStreamDeck extends EventEmitter {
 			coordinates,
 			isInMultiAction,
 			definition,
-			title: options.title ?? "",
+			title: options.title,
 			state: options.state ?? 0,
 		});
 
@@ -524,12 +525,14 @@ export class MockStreamDeck extends EventEmitter {
 		if (instance === undefined) {
 			return;
 		}
-		const title = isJsonString(payload.title) ? payload.title : "";
+		const title = isJsonString(payload.title) ? payload.title : undefined;
 		const state = isJsonNumber(payload.state) ? payload.state : undefined;
 
 		if (state === undefined) {
 			instance.title = title;
 			instance.titleByState.clear();
+		} else if (title === undefined) {
+			instance.titleByState.delete(state);
 		} else {
 			instance.titleByState.set(state, title);
 		}
@@ -571,8 +574,7 @@ export class MockStreamDeck extends EventEmitter {
 	 * silently drops, so the screenshot alone would not reveal the problem.
 	 */
 	#lintImagePayload(instance: ActionInstance, image: string): void {
-		const match = /^data:image\/svg\+xml(;base64)?,(.*)$/s.exec(image);
-		if (match === null) {
+		if (!image.startsWith("data:image/svg+xml")) {
 			return;
 		}
 
@@ -582,8 +584,10 @@ export class MockStreamDeck extends EventEmitter {
 		}
 		this.#lintedImages.add(key);
 
-		const body = match[2] ?? "";
-		const svg = match[1] === undefined ? decodeURIComponent(body) : Buffer.from(body, "base64").toString("utf8");
+		const svg = parseDataUri(image)?.text;
+		if (svg === undefined) {
+			return;
+		}
 		const result = lintSvg(svg, `setImage(${instance.uuid})`);
 
 		for (const finding of result.findings) {

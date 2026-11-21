@@ -7,7 +7,7 @@ export function stateRoot(): string {
 }
 
 export function sessionDir(session: string): string {
-	return join(stateRoot(), session);
+	return join(stateRoot(), validateSessionName(session));
 }
 
 export function metaPath(session: string): string {
@@ -34,9 +34,17 @@ export function socketPath(session: string): string {
 	return Buffer.byteLength(preferred) < 100 ? preferred : join(tmpdir(), `sdtest-${session}.sock`);
 }
 
+/** Whether `session` is safe to use as a single directory name under the state root. */
+export function isSessionName(session: string): boolean {
+	// 1-64 letters, digits, dots, dashes, or underscores: one path segment that is also valid in a pipe name.
+	return /^[a-zA-Z0-9._-]{1,64}$/.test(session) && session !== "." && session !== "..";
+}
+
 export function validateSessionName(session: string): string {
-	if (!/^[a-zA-Z0-9._-]{1,64}$/.test(session)) {
-		throw new Error(`invalid session name "${session}": use 1-64 characters from a-z, A-Z, 0-9, dot, dash, underscore`);
+	if (!isSessionName(session)) {
+		throw new Error(
+			`invalid session name "${session}": use 1-64 characters from a-z, A-Z, 0-9, dot, dash, underscore (not "." or "..")`,
+		);
 	}
 	return session;
 }

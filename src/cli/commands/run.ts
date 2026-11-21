@@ -52,7 +52,7 @@ export async function runCommand(args: Args): Promise<void> {
 	} finally {
 		client.close();
 		if (!keep) {
-			await closeSession(session);
+			await closeSession(session, true);
 		}
 	}
 

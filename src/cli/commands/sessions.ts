@@ -1,8 +1,17 @@
 import { type ChildProcess, spawn } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { basename, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { metaPath, sessionDir, socketPath, stateRoot, validateSessionName } from "../../daemon/paths.js";
+import {
+	artifactsDir,
+	isSessionName,
+	metaPath,
+	sessionDir,
+	socketPath,
+	stateRoot,
+	validateSessionName,
+} from "../../daemon/paths.js";
 import {
 	compactJson,
 	errorMessage,
@@ -201,18 +210,46 @@ async function waitForMeta(session: string, timeoutMs: number): Promise<Meta> {
 	}
 }
 
-/** Stops a session and removes its state directory. Safe to call when nothing is running. */
-export async function closeSession(session: string): Promise<void> {
+/**
+ * Stops a session, waits for its daemon to exit, and removes its state directory. Safe to
+ * call when nothing is running. With `keepArtifacts`, screenshots and snapshots the session
+ * wrote stay on disk.
+ */
+export async function closeSession(session: string, keepArtifacts = false): Promise<void> {
+	validateSessionName(session);
+	const pid = readMeta(session)?.pid;
 	try {
 		const client = await DaemonClient.connect(session);
 		await client.call("close");
 		client.close();
+		await waitForExit(pid, 10_000);
 	} catch {
 		// Already gone; fall through to cleaning up its directory.
 	}
-	rmSync(sessionDir(session), { recursive: true, force: true });
+	removeSessionState(session, keepArtifacts);
 	if (process.platform !== "win32") {
 		rmSync(socketPath(session), { force: true });
+	}
+}
+
+async function waitForExit(pid: number | undefined, timeoutMs: number): Promise<void> {
+	const deadline = Date.now() + timeoutMs;
+	while (isAlive(pid) && Date.now() < deadline) {
+		await new Promise((done) => setTimeout(done, 25));
+	}
+}
+
+function removeSessionState(session: string, keepArtifacts: boolean): void {
+	const directory = sessionDir(session);
+	const artifacts = artifactsDir(session);
+	if (!keepArtifacts || !existsSync(artifacts) || readdirSync(artifacts).length === 0) {
+		rmSync(directory, { recursive: true, force: true });
+		return;
+	}
+	for (const entry of readdirSync(directory)) {
+		if (entry !== basename(artifacts)) {
+			rmSync(join(directory, entry), { recursive: true, force: true });
+		}
 	}
 }
 
@@ -239,7 +276,7 @@ function listSessions(): SessionRow[] {
 		return [];
 	}
 	return readdirSync(root).flatMap((session) => {
-		const meta = readMeta(session);
+		const meta = isSessionName(session) ? readMeta(session) : undefined;
 		if (meta === undefined) {
 			return [];
 		}

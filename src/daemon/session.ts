@@ -93,6 +93,9 @@ export class Session {
 				new Error(`plugin exited before registering (code ${String(exit.code)}, signal ${String(exit.signal)})`),
 			);
 		});
+		plugin.on("error", (cause: Error) => {
+			host.failRegistration(new Error(`could not launch the plugin process: ${cause.message}`));
+		});
 
 		const session = new Session({ name: options.name, project, host, plugin, artifacts });
 

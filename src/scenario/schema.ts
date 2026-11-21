@@ -159,52 +159,58 @@ function parseStep(value: JsonValue, source: string): Step {
 	}
 
 	const step: Step = {};
-	assignString(step, value, "name");
-	assignString(step, value, "add");
-	assignString(step, value, "as");
-	assignObject(step, value, "settings");
-	assignNumber(step, value, "column");
-	assignNumber(step, value, "row");
-	assignNumber(step, value, "state");
-	assignString(step, value, "title");
-	assignString(step, value, "remove");
-	assignString(step, value, "appear");
-	assignString(step, value, "disappear");
-	assignString(step, value, "press");
-	assignNumber(step, value, "hold");
-	assignNumber(step, value, "settle");
-	assignString(step, value, "screenshot");
-	assignString(step, value, "shotName");
-	assignNumber(step, value, "size");
-	assignObject(step, value, "setSettings");
-	assignString(step, value, "ref");
-	assignObject(step, value, "setGlobalSettings");
-	assignObject(step, value, "setSecrets");
-	assignString(step, value, "piOpen");
-	assignString(step, value, "piSet");
+	assignString(step, value, "name", source);
+	assignString(step, value, "add", source);
+	assignString(step, value, "as", source);
+	assignObject(step, value, "settings", source);
+	assignNumber(step, value, "column", source);
+	assignNumber(step, value, "row", source);
+	assignNumber(step, value, "state", source);
+	assignString(step, value, "title", source);
+	assignString(step, value, "remove", source);
+	assignString(step, value, "appear", source);
+	assignString(step, value, "disappear", source);
+	assignString(step, value, "press", source);
+	assignNumber(step, value, "hold", source);
+	assignNumber(step, value, "settle", source);
+	assignString(step, value, "screenshot", source);
+	assignString(step, value, "shotName", source);
+	assignNumber(step, value, "size", source);
+	assignObject(step, value, "setSettings", source);
+	assignString(step, value, "ref", source);
+	assignObject(step, value, "setGlobalSettings", source);
+	assignObject(step, value, "setSecrets", source);
+	assignString(step, value, "piOpen", source);
+	assignString(step, value, "piSet", source);
 	if ("value" in value) {
 		step.value = value.value;
 	}
-	assignString(step, value, "piClick");
-	assignString(step, value, "piScreenshot");
-	assignBoolean(step, value, "piClose");
-	assignNumber(step, value, "waitQuiet");
-	assignString(step, value, "checkLifecycle");
-	assignNumber(step, value, "cycles");
-	assignNumber(step, value, "warmup");
-	assignString(step, value, "lintSvg");
-	assignBoolean(step, value, "allowWarnings");
+	assignString(step, value, "piClick", source);
+	assignString(step, value, "piScreenshot", source);
+	assignBoolean(step, value, "piClose", source);
+	assignNumber(step, value, "waitQuiet", source);
+	assignString(step, value, "checkLifecycle", source);
+	assignNumber(step, value, "cycles", source);
+	assignNumber(step, value, "warmup", source);
+	assignString(step, value, "lintSvg", source);
+	assignBoolean(step, value, "allowWarnings", source);
 
 	const interact = value.interact;
 	if (interact === "none" || interact === "press") {
 		step.interact = interact;
+	} else if (interact !== undefined) {
+		throw new Error(`${source}.interact: expected "none" or "press"`);
 	}
 	const expectVerdict = value.expectVerdict;
 	if (expectVerdict === "inconclusive" || expectVerdict === "leak" || expectVerdict === "pass") {
 		step.expectVerdict = expectVerdict;
+	} else if (expectVerdict !== undefined) {
+		throw new Error(`${source}.expectVerdict: expected "pass", "leak", or "inconclusive"`);
 	}
 	if (isJsonObject(value.expect)) {
 		step.expect = parseExpectation(value.expect, `${source}.expect`);
+	} else if (value.expect !== undefined) {
+		throw new Error(`${source}.expect: expected a mapping`);
 	}
 	return step;
 }
@@ -217,81 +223,162 @@ type ExpectedEvent = {
 	max?: number;
 };
 
+const EXPECTATION_KEYS = [
+	"key",
+	"state",
+	"title",
+	"titleMatches",
+	"visible",
+	"imageSource",
+	"settingsOf",
+	"settingsContain",
+	"globalSettingsContain",
+	"events",
+	"noViolations",
+	"maxViolations",
+	"violationKinds",
+	"maxLogErrors",
+] as const satisfies Array<keyof Expectation>;
+
+const KEY_ASSERTIONS = ["state", "title", "titleMatches", "visible", "imageSource"] as const;
+
+const EXPECTED_EVENT_KEYS = ["event", "context", "action", "min", "max"] as const satisfies Array<keyof ExpectedEvent>;
+
+/**
+ * Parses an `expect` block strictly: an unknown key, a wrong value type, or an assertion
+ * missing the field that names its target is an error, because silently dropping it would
+ * turn the intended assertion into a pass.
+ */
 function parseExpectation(value: JsonObject, source: string): Expectation {
+	rejectUnknownKeys(value, EXPECTATION_KEYS, source);
+
 	const expectation: Expectation = {};
-	assignString(expectation, value, "key");
-	assignNumber(expectation, value, "state");
-	assignString(expectation, value, "title");
-	assignString(expectation, value, "titleMatches");
-	assignBoolean(expectation, value, "visible");
+	assignString(expectation, value, "key", source);
+	assignNumber(expectation, value, "state", source);
+	assignString(expectation, value, "title", source);
+	assignString(expectation, value, "titleMatches", source);
+	assignBoolean(expectation, value, "visible", source);
 	const imageSource = value.imageSource;
 	if (imageSource === "manifest" || imageSource === "none" || imageSource === "setImage") {
 		expectation.imageSource = imageSource;
+	} else if (imageSource !== undefined) {
+		throw new Error(`${source}.imageSource: expected "manifest", "setImage", or "none"`);
 	}
-	assignString(expectation, value, "settingsOf");
-	assignObject(expectation, value, "settingsContain");
-	assignObject(expectation, value, "globalSettingsContain");
-	assignBoolean(expectation, value, "noViolations");
-	assignNumber(expectation, value, "maxViolations");
-	assignNumber(expectation, value, "maxLogErrors");
+	assignString(expectation, value, "settingsOf", source);
+	assignObject(expectation, value, "settingsContain", source);
+	assignObject(expectation, value, "globalSettingsContain", source);
+	assignBoolean(expectation, value, "noViolations", source);
+	assignNumber(expectation, value, "maxViolations", source);
+	assignNumber(expectation, value, "maxLogErrors", source);
+
+	const orphan = KEY_ASSERTIONS.find((name) => value[name] !== undefined);
+	if (expectation.key === undefined && orphan !== undefined) {
+		throw new Error(`${source}.${orphan}: needs "key" naming the action instance to check`);
+	}
+	if ((expectation.settingsOf === undefined) !== (expectation.settingsContain === undefined)) {
+		throw new Error(`${source}: "settingsOf" and "settingsContain" must be used together`);
+	}
 
 	const kinds = value.violationKinds;
-	if (Array.isArray(kinds)) {
+	if (kinds !== undefined) {
+		if (!Array.isArray(kinds) || !kinds.every((entry) => isJsonString(entry))) {
+			throw new Error(`${source}.violationKinds: expected a list of strings`);
+		}
 		expectation.violationKinds = kinds.filter((entry) => isJsonString(entry));
 	}
 
 	const events = value.events;
-	if (Array.isArray(events)) {
-		expectation.events = events.flatMap((entry, index) => {
+	if (events !== undefined) {
+		if (!Array.isArray(events)) {
+			throw new Error(`${source}.events: expected a list`);
+		}
+		expectation.events = events.map((entry, index) => {
+			const where = `${source}.events[${index}]`;
 			if (!isJsonObject(entry) || !isJsonString(entry.event)) {
-				throw new Error(`${source}.events[${index}]: expected { event }`);
+				throw new Error(`${where}: expected { event }`);
 			}
+			rejectUnknownKeys(entry, EXPECTED_EVENT_KEYS, where);
 			const item: ExpectedEvent = {
 				event: entry.event,
 			};
-			if (isJsonString(entry.context)) {
-				item.context = entry.context;
-			}
-			if (isJsonString(entry.action)) {
-				item.action = entry.action;
-			}
-			if (isJsonNumber(entry.min)) {
-				item.min = entry.min;
-			}
-			if (isJsonNumber(entry.max)) {
-				item.max = entry.max;
-			}
-			return [item];
+			assignString(item, entry, "context", where);
+			assignString(item, entry, "action", where);
+			assignNumber(item, entry, "min", where);
+			assignNumber(item, entry, "max", where);
+			return item;
 		});
 	}
 
 	return expectation;
 }
 
-function assignString<K extends string>(target: Partial<Record<K, string>>, source: JsonObject, key: K): void {
-	const value = source[key];
-	if (isJsonString(value)) {
-		target[key] = value;
+function rejectUnknownKeys(value: JsonObject, known: readonly string[], where: string): void {
+	const unknown = Object.keys(value).find((key) => !known.includes(key));
+	if (unknown !== undefined) {
+		throw new Error(`${where}.${unknown}: unknown key. Known keys: ${known.join(", ")}`);
 	}
 }
 
-function assignNumber<K extends string>(target: Partial<Record<K, number>>, source: JsonObject, key: K): void {
+function assignString<K extends string>(
+	target: Partial<Record<K, string>>,
+	source: JsonObject,
+	key: K,
+	where: string,
+): void {
 	const value = source[key];
-	if (isJsonNumber(value)) {
-		target[key] = value;
+	if (value === undefined) {
+		return;
 	}
+	if (!isJsonString(value)) {
+		throw new Error(`${where}.${key}: expected a string`);
+	}
+	target[key] = value;
 }
 
-function assignBoolean<K extends string>(target: Partial<Record<K, boolean>>, source: JsonObject, key: K): void {
+function assignNumber<K extends string>(
+	target: Partial<Record<K, number>>,
+	source: JsonObject,
+	key: K,
+	where: string,
+): void {
 	const value = source[key];
-	if (isJsonBoolean(value)) {
-		target[key] = value;
+	if (value === undefined) {
+		return;
 	}
+	if (!isJsonNumber(value)) {
+		throw new Error(`${where}.${key}: expected a number`);
+	}
+	target[key] = value;
 }
 
-function assignObject<K extends string>(target: Partial<Record<K, JsonObject>>, source: JsonObject, key: K): void {
+function assignBoolean<K extends string>(
+	target: Partial<Record<K, boolean>>,
+	source: JsonObject,
+	key: K,
+	where: string,
+): void {
 	const value = source[key];
-	if (isJsonObject(value)) {
-		target[key] = value;
+	if (value === undefined) {
+		return;
 	}
+	if (!isJsonBoolean(value)) {
+		throw new Error(`${where}.${key}: expected true or false`);
+	}
+	target[key] = value;
+}
+
+function assignObject<K extends string>(
+	target: Partial<Record<K, JsonObject>>,
+	source: JsonObject,
+	key: K,
+	where: string,
+): void {
+	const value = source[key];
+	if (value === undefined) {
+		return;
+	}
+	if (!isJsonObject(value)) {
+		throw new Error(`${where}.${key}: expected a mapping`);
+	}
+	target[key] = value;
 }
