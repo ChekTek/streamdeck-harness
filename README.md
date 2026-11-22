@@ -49,6 +49,26 @@ sdtest -s=demo close
 - A session stops after 15 minutes without use. Change this with `--idle-timeout`.
 - `sdtest list` shows the sessions.
 
+## Property inspector
+
+```bash
+sdtest -s=demo pi-open com.example.plugin.action
+sdtest -s=demo pi-fields
+sdtest -s=demo pi-set mode get
+```
+
+`pi-open` returns when the page is ready. The page is ready when:
+
+- It called `connectElgatoStreamDeckSocket` and registered with the mock host.
+- No frames are in flight between the page and the host. The page has the answers to its
+  requests, for example `getSettings` and `getGlobalSettings`.
+- Each component with a `setting` attribute completed its update.
+- The body is visible.
+
+The output shows `ready` and the time that the command waited. After the time limit, the
+command returns with `ready: false` and the reason. Change the limit with `--timeout`
+(default: 5000 ms). With `--no-wait`, the command waits only for the connection.
+
 ## Scenarios
 
 A scenario file runs a full check in one command. The exit code is not zero when a step fails.

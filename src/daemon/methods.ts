@@ -340,7 +340,13 @@ export const methods = {
 		});
 		session.propertyInspector = inspector;
 
-		const connected = await inspector.waitForConnect(num(params, "timeoutMs") ?? 5_000);
+		const timeoutMs = num(params, "timeoutMs") ?? 5_000;
+		const started = Date.now();
+		const connected = await inspector.waitForConnect(timeoutMs);
+		const blocker = await inspector.waitForReady(
+			() => session.host.uiTraffic(instance.context),
+			bool(params, "wait") === false ? 0 : Math.max(started + timeoutMs - Date.now(), 0),
+		);
 		const hint = connected
 			? undefined
 			: "The page never called connectElgatoStreamDeckSocket. Check that the property inspector loads its SDPI bundle, and read consoleErrors.";
@@ -351,6 +357,9 @@ export const methods = {
 			action: instance.uuid,
 			connected,
 			registered: session.host.hasUi(instance.context),
+			ready: blocker === undefined,
+			waitedMs: Date.now() - started,
+			reason: blocker,
 			fields: await inspector.fields(),
 			consoleErrors: inspector.consoleLines.filter((line) => line.type === "error").map((line) => line.text),
 			pageErrors: inspector.pageErrors,

@@ -10,6 +10,7 @@ import {
 	type JsonValue,
 	type RegistrationInfo,
 } from "../host/protocol.js";
+import type { UiTraffic } from "../host/ws-server.js";
 import type { PluginProject } from "../plugin/manifest.js";
 import { getBrowser } from "../render/chromium.js";
 import { StaticServer } from "./static-server.js";
@@ -29,6 +30,24 @@ export type OpenOptions = {
 };
 
 export type ConsoleLine = { type: string; text: string };
+
+declare global {
+	interface Window {
+		__sdtestConnected?: boolean;
+		__sdtestTraffic?: UiTraffic;
+	}
+}
+
+/** Time between two readiness checks, in milliseconds. */
+const READY_POLL_MS = 10;
+
+type PageState = {
+	connected: boolean;
+	traffic: UiTraffic;
+	undefinedTags: string[];
+	updated: boolean;
+	visible: boolean;
+};
 
 /** A headless property inspector. Only one is open at a time. */
 export class Inspector {
@@ -243,6 +262,74 @@ export class Inspector {
 			return false;
 		}
 	}
+
+	/**
+	 * Waits until the page is ready: it registered with the host, no frame is in flight between
+	 * them, each component with a `setting` attribute completed its update, and the body is
+	 * visible. `hostTraffic` reads the frame counts of the host. Returns undefined when the page
+	 * is ready, or what it still waits for after `timeoutMs`.
+	 */
+	public async waitForReady(hostTraffic: () => UiTraffic | undefined, timeoutMs: number): Promise<string | undefined> {
+		const deadline = Date.now() + timeoutMs;
+		let confirmed = false;
+		for (;;) {
+			const state = await this.#state(Math.max(deadline - Date.now(), 0));
+			const blocker = blockerOf(state, hostTraffic());
+			if (blocker === undefined && confirmed) {
+				return undefined;
+			}
+			if (blocker !== undefined && Date.now() >= deadline) {
+				return blocker;
+			}
+			confirmed = blocker === undefined;
+			if (!confirmed) {
+				await new Promise((done) => setTimeout(done, READY_POLL_MS));
+			}
+		}
+	}
+
+	/** Reads the readiness state of the page. Waits at most `budgetMs` for the component updates. */
+	async #state(budgetMs: number): Promise<PageState> {
+		return this.#page.evaluate(async (budget) => {
+			type SdpiHost = Element & { updateComplete?: Promise<boolean> };
+			const bound = [...document.querySelectorAll("[setting]")];
+			const updated = await Promise.race([
+				// SAFETY: SDPI elements have updateComplete. lib.dom does not declare it.
+				Promise.allSettled(bound.map((element) => (element as SdpiHost).updateComplete)).then(() => true),
+				new Promise<boolean>((done) => setTimeout(done, budget, false)),
+			]);
+			return {
+				connected: window.__sdtestConnected === true,
+				traffic: window.__sdtestTraffic ?? { received: 0, sent: 0 },
+				undefinedTags: bound.filter((element) => !element.matches(":defined")).map((element) => element.localName),
+				updated,
+				visible: document.body.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true }),
+			};
+		}, budgetMs);
+	}
+}
+
+/** Tells what the page still waits for. Returns undefined when it is ready. */
+function blockerOf(state: PageState, hostTraffic: UiTraffic | undefined): string | undefined {
+	if (!state.connected) {
+		return "the page did not call connectElgatoStreamDeckSocket";
+	}
+	if (hostTraffic === undefined) {
+		return "the page did not register with the host";
+	}
+	if (state.traffic.sent !== hostTraffic.received || state.traffic.received !== hostTraffic.sent) {
+		return "frames are in flight between the page and the host";
+	}
+	if (state.undefinedTags.length > 0) {
+		return `custom elements are not defined: ${[...new Set(state.undefinedTags)].join(", ")}`;
+	}
+	if (!state.updated) {
+		return "a component with a setting attribute did not complete its update";
+	}
+	if (!state.visible) {
+		return "the page body is hidden";
+	}
+	return undefined;
 }
 
 /**
@@ -277,6 +364,22 @@ function bootstrapScript(hostPort: number, uuid: string, info: RegistrationInfo,
   const ready = (fn) => {
     if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", fn, { once: true });
     else queueMicrotask(fn);
+  };
+
+  // Count the frames on the socket to the host. The harness compares them with the counts of the host.
+  const traffic = (window.__sdtestTraffic = { received: 0, sent: 0 });
+  const send = WebSocket.prototype.send;
+  let hostSocket;
+  WebSocket.prototype.send = function (data) {
+    send.call(this, data);
+    if (new URL(this.url).port !== args[0]) return;
+    if (hostSocket !== this) {
+      hostSocket = this;
+      traffic.received = 0;
+      traffic.sent = 0;
+      this.addEventListener("message", () => { if (hostSocket === this) traffic.received++; });
+    }
+    traffic.sent++;
   };
 
   Object.defineProperty(window, "connectElgatoStreamDeckSocket", {

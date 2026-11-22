@@ -41,6 +41,9 @@ export type AddActionOptions = {
 	appear?: boolean;
 };
 
+/** Frames the host received from, and sent to, one property inspector. */
+export type UiTraffic = { received: number; sent: number };
+
 /** Mock Stream Deck host. One WebSocket server talks to the plugin and to the property inspector. */
 export class MockStreamDeck extends EventEmitter {
 	public readonly devices: Device[];
@@ -54,6 +57,7 @@ export class MockStreamDeck extends EventEmitter {
 	readonly #info: RegistrationInfo;
 	readonly #actions = new Map<string, ActionInstance>();
 	readonly #uiSockets = new Map<string, WebSocket>();
+	readonly #uiTraffic = new Map<string, UiTraffic>();
 	/** Payloads that the lint already checked. */
 	readonly #lintedImages = new Set<string>();
 
@@ -283,6 +287,11 @@ export class MockStreamDeck extends EventEmitter {
 		this.#sendToPlugin(frame);
 	}
 
+	/** Counts the frames exchanged with the property inspector of `context` since it registered. */
+	public uiTraffic(context: string): UiTraffic | undefined {
+		return this.#uiTraffic.get(context);
+	}
+
 	/** Resolves when the plugin completes the `registerPlugin` handshake. */
 	public async waitForPlugin(timeoutMs: number): Promise<void> {
 		let timer: NodeJS.Timeout | undefined;
@@ -360,13 +369,21 @@ export class MockStreamDeck extends EventEmitter {
 			this.recorder.violation("bad-registration", `property inspector registered for unknown context ${context}`);
 		}
 
+		const traffic: UiTraffic = { received: 1, sent: 0 };
 		this.#uiSockets.set(context, socket);
+		this.#uiTraffic.set(context, traffic);
 		this.recorder.record("from-pi", frame);
 
-		socket.on("message", (raw) => this.#onUiMessage(context, String(raw)));
+		socket.on("message", (raw) => {
+			traffic.received++;
+			this.#onUiMessage(context, String(raw));
+		});
 		socket.on("close", () => {
 			if (this.#uiSockets.get(context) === socket) {
 				this.#uiSockets.delete(context);
+			}
+			if (this.#uiTraffic.get(context) === traffic) {
+				this.#uiTraffic.delete(context);
 			}
 		});
 
@@ -391,8 +408,12 @@ export class MockStreamDeck extends EventEmitter {
 
 	#sendToUi(context: string, frame: Frame): void {
 		const socket = this.#uiSockets.get(context);
+		const traffic = this.#uiTraffic.get(context);
 		this.recorder.record("to-pi", frame);
-		socket?.send(JSON.stringify(frame));
+		if (socket !== undefined && traffic !== undefined) {
+			traffic.sent++;
+			socket.send(JSON.stringify(frame));
+		}
 	}
 
 	// ---------------------------------------------------------------- plugin commands
