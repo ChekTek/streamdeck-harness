@@ -18,6 +18,9 @@ import { StaticServer } from "./static-server.js";
 export const DEFAULT_PI_WIDTH = 345;
 export const DEFAULT_PI_HEIGHT = 600;
 
+/** The characters that need the Shift key on a US keyboard. */
+const US_SHIFT_CHARACTERS = '~!@#$%^&*()_+{}|:"<>?ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+
 export type OpenOptions = {
 	project: PluginProject;
 	instance: ActionInstance;
@@ -242,9 +245,10 @@ export class Inspector {
 	}
 
 	/**
-	 * Types into the text field of an SDPI component with real keyboard input. Each character
-	 * sends `keydown`, `keypress`, `beforeinput`, `input` and `keyup`. A character that has no key
-	 * on a US keyboard sends only `beforeinput` and `input`.
+	 * Types into the text field of an SDPI component with real keyboard input on a US keyboard
+	 * layout. Each character sends `keydown`, `keypress`, `beforeinput`, `input` and `keyup`. Shift
+	 * is held for a character that needs it. A character that has no key on a US keyboard sends
+	 * only `beforeinput` and `input`.
 	 */
 	public async typeField(setting: string, text: string, options: TypeOptions = {}): Promise<JsonObject> {
 		const focused = await this.#page.evaluate(
@@ -296,7 +300,15 @@ export class Inspector {
 		if (options.paste === true) {
 			await this.#paste(text);
 		} else {
-			await keyboard.type(text);
+			for (const character of text) {
+				if (US_SHIFT_CHARACTERS.includes(character)) {
+					await keyboard.down("Shift");
+					await keyboard.press(character);
+					await keyboard.up("Shift");
+				} else {
+					await keyboard.type(character);
+				}
+			}
 		}
 
 		const value = await this.#page.evaluate(

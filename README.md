@@ -63,6 +63,8 @@ sdtest -s=demo pi-type hours 12x7 --paste
 - `pi-type` types into a text field with real keyboard input. Use it to test input filters
   (`beforeinput`, key handlers). Each character sends `keydown`, `keypress`, `beforeinput`,
   `input` and `keyup`.
+- The keys are those of a US keyboard layout. Shift is held for a character that needs it
+  (`A`, `!`). A character that has no key on a US keyboard sends only `beforeinput` and `input`.
 - `pi-type` first deletes the current value with Backspace. With `--no-clear`, the text goes
   at the end of the current value.
 - `--paste` inserts the text with one clipboard paste (Ctrl+V, or Cmd+V on macOS). The field
