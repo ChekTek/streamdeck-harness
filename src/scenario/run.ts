@@ -28,10 +28,6 @@ export async function runScenario(
 	const steps: StepResult[] = [];
 	const artifacts: string[] = [];
 
-	if (scenario.globalSettings !== undefined) {
-		await client.call("setGlobalSettings", compactJson({ settings: scenario.globalSettings }));
-	}
-
 	for (const [index, step] of scenario.steps.entries()) {
 		const result: StepResult = { index, name: step.name ?? describeStep(step), ok: true, failures: [] };
 
@@ -209,6 +205,12 @@ async function runStep(
 			}),
 		);
 	}
+	if (step.piVisible !== undefined) {
+		return expectVisibility(client, step.piVisible, true);
+	}
+	if (step.piHidden !== undefined) {
+		return expectVisibility(client, step.piHidden, false);
+	}
 	if (step.piScreenshot !== undefined) {
 		const shot = await callObject(client, "piScreenshot", compactJson({ name: step.piScreenshot }));
 		if (isJsonString(shot.png)) {
@@ -269,6 +271,16 @@ async function runStep(
 		return null;
 	}
 	throw new Error(`step has no recognised action: ${JSON.stringify(step)}`);
+}
+
+/** Fails when the element of the property inspector is not in the wanted state. An absent element is hidden. */
+async function expectVisibility(client: DaemonClient, target: string, wanted: boolean): Promise<JsonValue> {
+	const state = await callObject(client, "piVisible", compactJson({ target }));
+	if (state.visible !== wanted) {
+		const actual = state.found === true ? (state.visible === true ? "shown" : "hidden") : "absent";
+		throw new Error(`${JSON.stringify(target)} is ${actual}, expected ${wanted ? "shown" : "hidden"}`);
+	}
+	return state;
 }
 
 async function assertExpectation(client: DaemonClient, expectation: Expectation, aliases: Aliases): Promise<string[]> {

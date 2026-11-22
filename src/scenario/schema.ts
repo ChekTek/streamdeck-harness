@@ -8,6 +8,7 @@ import {
 	type JsonObject,
 	type JsonValue,
 } from "../host/protocol.js";
+import { parsePluginEnv } from "../plugin/launch.js";
 
 export type Expectation = {
 	/** Asserts the visual state of a key. */
@@ -75,6 +76,10 @@ export type Step = {
 	paste?: boolean;
 	blur?: boolean;
 	piClick?: string;
+	/** Fails unless the element is shown. */
+	piVisible?: string;
+	/** Fails if the element is shown. */
+	piHidden?: string;
 	piScreenshot?: string;
 	piClose?: boolean;
 
@@ -97,7 +102,12 @@ export type Scenario = {
 	plugin: string;
 	device?: string[] | string;
 	node?: string;
+	/** Global settings that the host holds before the plugin starts. */
 	globalSettings?: JsonObject;
+	/** Environment variables for the plugin process. */
+	env?: NodeJS.ProcessEnv;
+	/** Path of a `.env` file for the plugin process, relative to the scenario file. */
+	dotenv?: string;
 	steps: Step[];
 };
 
@@ -146,6 +156,16 @@ export function parseScenario(value: JsonValue, source: string): Scenario {
 	if (isJsonObject(value.globalSettings)) {
 		scenario.globalSettings = value.globalSettings;
 	}
+	if (isJsonObject(value.env)) {
+		scenario.env = parsePluginEnv(value.env, `${source} env`);
+	} else if (value.env !== undefined) {
+		throw new Error(`${source} env: expected a mapping`);
+	}
+	if (isJsonString(value.dotenv)) {
+		scenario.dotenv = value.dotenv;
+	} else if (value.dotenv !== undefined) {
+		throw new Error(`${source} dotenv: expected a path`);
+	}
 
 	const device = value.device;
 	if (isJsonString(device)) {
@@ -190,6 +210,8 @@ const STEP_KEYS = [
 	"paste",
 	"blur",
 	"piClick",
+	"piVisible",
+	"piHidden",
 	"piScreenshot",
 	"piClose",
 	"waitQuiet",
@@ -244,6 +266,8 @@ function parseStep(value: JsonValue, source: string): Step {
 	assignBoolean(step, value, "paste", source);
 	assignBoolean(step, value, "blur", source);
 	assignString(step, value, "piClick", source);
+	assignString(step, value, "piVisible", source);
+	assignString(step, value, "piHidden", source);
 	assignString(step, value, "piScreenshot", source);
 	assignBoolean(step, value, "piClose", source);
 	assignNumber(step, value, "waitQuiet", source);

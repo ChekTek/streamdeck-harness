@@ -11,9 +11,9 @@ import {
 import { type Args, flagBool, flagJson, flagList, flagNumber, flagString, parseArgs } from "./args.js";
 import { DaemonClient } from "./client.js";
 import { installBrowserCommand } from "./commands/browser.js";
-import { lintCommand } from "./commands/lint.js";
-import { runCommand } from "./commands/run.js";
-import { closeCommand, listCommand, startCommand } from "./commands/sessions.js";
+import { LINT_USAGE, lintCommand } from "./commands/lint.js";
+import { RUN_USAGE, runCommand } from "./commands/run.js";
+import { CLOSE_USAGE, closeCommand, listCommand, START_USAGE, startCommand } from "./commands/sessions.js";
 import { emit, fail, isJsonMode, print, setJsonMode, table } from "./output.js";
 
 type Remote = {
@@ -21,7 +21,7 @@ type Remote = {
 	summary: string;
 	usage: string;
 	params: (args: Args) => JsonObject;
-	human?: (result: JsonValue) => string;
+	human?: (result: JsonValue, args: Args) => string;
 };
 
 function jsonObject(value: JsonValue | undefined): JsonObject {
@@ -405,12 +405,24 @@ const REMOTE = {
 	},
 	"pi-click": {
 		method: "piClick",
-		summary: "Click something in the property inspector (CSS selector, or visible text).",
+		summary:
+			"Click something in the property inspector (CSS selector, or visible text). The prefix css= or text= sets which one.",
 		usage: "pi-click <selector-or-text> [--settle MS]",
 		params: (args: Args): JsonObject => compactJson({ target: args.positional[0], settleMs: flagNumber(args, "settle") }),
 		human: (result: JsonValue): string => {
 			const row = jsonObject(result);
 			return `clicked ${text(row.clicked)}\nsettings: ${JSON.stringify(row.settings)}`;
+		},
+	},
+	"pi-visible": {
+		method: "piVisible",
+		summary:
+			"Tell if an element of the property inspector is shown (CSS selector, or visible text). The prefix css= or text= sets which one.",
+		usage: "pi-visible <selector-or-text>",
+		params: (args: Args): JsonObject => compactJson({ target: args.positional[0] }),
+		human: (result: JsonValue): string => {
+			const row = jsonObject(result);
+			return row.found === true ? `visible ${text(row.visible)}` : "visible false (no element matches)";
 		},
 	},
 	"pi-screenshot": {
@@ -520,7 +532,7 @@ const REMOTE = {
 		method: "events",
 		summary: "Read the WebSocket transcript in both directions.",
 		usage:
-			"events [--event a,b] [--direction to-plugin,from-plugin] [--context C] [--action U] [--since SEQ] [--limit N]",
+			"events [--event a,b] [--direction to-plugin,from-plugin] [--context C] [--action U] [--since SEQ] [--limit N] [--payload]",
 		params: (args: Args): JsonObject =>
 			compactJson({
 				event: flagList(args, "event"),
@@ -530,8 +542,9 @@ const REMOTE = {
 				sinceSeq: flagNumber(args, "since"),
 				limit: flagNumber(args, "limit"),
 			}),
-		human: (result: JsonValue): string => {
+		human: (result: JsonValue, args: Args): string => {
 			const row = jsonObject(result);
+			const withPayload = flagBool(args, "payload") === true;
 			const arrows = {
 				"to-plugin": "->",
 				"from-plugin": "<-",
@@ -554,6 +567,7 @@ const REMOTE = {
 					arrow,
 					text(item.event),
 					item.context === undefined ? "" : text(item.context).slice(0, 8),
+					...(withPayload ? [text(jsonObject(item.frame).payload)] : []),
 				];
 			});
 			const violations = jsonArray(row.violations).map((entry) => {
@@ -641,14 +655,46 @@ function remoteFor(verb: string): Remote | undefined {
 	return undefined;
 }
 
+type Local = { label: string; summary: string; usage: string; session: boolean };
+
+/** Commands that the CLI runs itself. The other commands go to the daemon of a session. */
+const LOCAL = {
+	start: {
+		label: "start <path>",
+		summary: "Launch a plugin headlessly and hold it open in a background daemon.",
+		usage: START_USAGE,
+		session: true,
+	},
+	close: {
+		label: "close [--all]",
+		summary: "Stop a session (or every session) and delete its artifacts, unless --keep-artifacts is set.",
+		usage: CLOSE_USAGE,
+		session: true,
+	},
+	list: { label: "list", summary: "List sessions.", usage: "list", session: false },
+	"lint-svg": {
+		label: "lint-svg <paths>",
+		summary: "Check SVGs against SVG Tiny 1.2 and the Stream Deck renderer (no session needed).",
+		usage: LINT_USAGE,
+		session: false,
+	},
+	run: {
+		label: "run <scenario.yaml>",
+		summary: "Run a whole declarative check in one call and print a single report.",
+		usage: RUN_USAGE,
+		session: false,
+	},
+	"install-browser": {
+		label: "install-browser",
+		summary: "Download the Chromium that screenshots and the property inspector use.",
+		usage: "install-browser",
+		session: false,
+	},
+} satisfies { [verb: string]: Local };
+
 function helpText(): string {
 	const rows = [
-		["start <path>", "Launch a plugin headlessly and hold it open in a background daemon."],
-		["close [--all]", "Stop a session (or every session) and clean up."],
-		["list", "List sessions."],
-		["lint-svg <paths>", "Check SVGs against SVG Tiny 1.2 and the Stream Deck renderer (no session needed)."],
-		["run <scenario.yaml>", "Run a whole declarative check in one call and print a single report."],
-		["install-browser", "Download the Chromium that screenshots and the property inspector use."],
+		...Object.values(LOCAL).map((local) => [local.label, local.summary]),
 		...Object.entries(REMOTE).map(([verb, remote]) => [verb, remote.summary]),
 	];
 	return [
@@ -658,16 +704,39 @@ function helpText(): string {
 		"",
 		table(rows.map(([verb, summary]) => [`  ${verb!}`, summary!])),
 		"",
+		'Run "sdtest <command> --help" for the arguments of one command.',
 		"Sessions run detached and headless; the real Stream Deck app is never touched.",
 	].join("\n");
+}
+
+/** The usage and the summary of one command. Returns undefined for an unknown command. */
+function commandHelp(verb: string): string | undefined {
+	const local = Object.entries(LOCAL).find(([name]) => name === verb)?.[1];
+	const remote = remoteFor(verb);
+	const usage = local?.usage ?? remote?.usage;
+	const summary = local?.summary ?? remote?.summary;
+	if (usage === undefined || summary === undefined) {
+		return undefined;
+	}
+	const session = local?.session === false ? "" : "[-s=<session>] ";
+	return [`usage: sdtest ${session}${usage} [--json]`, "", summary].join("\n");
 }
 
 async function main(): Promise<void> {
 	const args = parseArgs(process.argv.slice(2));
 	setJsonMode(args.flags.get("json") === true || args.flags.get("json") === "true");
 
-	if (args.verb === "help" || args.flags.get("help") === true) {
-		print(helpText());
+	if (args.verb === "help" || flagBool(args, "help") === true) {
+		const topic = args.verb === "help" ? args.positional[0] : args.verb;
+		if (topic === undefined || topic === "help") {
+			print(helpText());
+			return;
+		}
+		const help = commandHelp(topic);
+		if (help === undefined) {
+			fail(`unknown command "${topic}". Run "sdtest help" for the list.`);
+		}
+		print(help);
 		return;
 	}
 
@@ -700,10 +769,11 @@ async function main(): Promise<void> {
 	const client = await DaemonClient.connect(args.session);
 	try {
 		const result = await client.call(remote.method, remote.params(args));
-		if (remote.human === undefined || isJsonMode()) {
+		const human = remote.human;
+		if (human === undefined || isJsonMode()) {
 			emit(result, stringifyResult);
 		} else {
-			emit(result, remote.human);
+			emit(result, (value) => human(value, args));
 		}
 	} finally {
 		client.close();

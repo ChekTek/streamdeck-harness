@@ -19,6 +19,10 @@ export type SessionOptions = {
 	inspect?: boolean;
 	/** Time limit for `registerPlugin`, in milliseconds. */
 	registerTimeoutMs?: number;
+	/** Global settings that the host holds before the plugin starts. */
+	globalSettings?: JsonObject;
+	/** Environment variables for the plugin process. */
+	env?: NodeJS.ProcessEnv;
 };
 
 /** One plugin under test: the mock host and the plugin process. */
@@ -73,6 +77,9 @@ export class Session {
 			}),
 			devices,
 		});
+		if (options.globalSettings !== undefined) {
+			host.settings.setGlobal(options.globalSettings);
+		}
 		const port = await host.listen();
 
 		const plugin = new PluginProcess({
@@ -82,6 +89,7 @@ export class Session {
 			info: host.info,
 			nodePath: options.nodePath,
 			inspect: options.inspect,
+			env: options.env,
 		});
 
 		// Fail the handshake when the plugin exits before registration.

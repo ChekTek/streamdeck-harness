@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+
 import { parseJsonObject, type JsonObject } from "../host/protocol.js";
 
 export type Args = {
@@ -17,11 +19,14 @@ const BOOLEAN_FLAGS = new Set([
 	"clear",
 	"full-page",
 	"heap-snapshot",
+	"help",
 	"inspect",
 	"json",
 	"keep",
+	"keep-artifacts",
 	"multi-action",
 	"paste",
+	"payload",
 	"raw",
 	"since-start",
 	"strict",
@@ -136,7 +141,7 @@ export function flagJson(args: Args, name: string): JsonObject | undefined {
 		return undefined;
 	}
 	try {
-		return parseJsonObject(value, `--${name}`);
+		return parseJsonObject(value.startsWith("@") ? readFileSync(value.slice(1), "utf8") : value, `--${name}`);
 	} catch (cause) {
 		throw new Error(`--${name} is not a JSON object: ${cause instanceof Error ? cause.message : String(cause)}`);
 	}

@@ -1,6 +1,6 @@
 import { type ChildProcess, spawn } from "node:child_process";
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { basename, join } from "node:path";
+import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { basename, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
@@ -21,7 +21,8 @@ import {
 	type JsonObject,
 	parseJsonValue,
 } from "../../host/protocol.js";
-import { type Args, flagBool, flagList, flagNumber, flagString } from "../args.js";
+import { parsePluginEnv } from "../../plugin/launch.js";
+import { type Args, flagBool, flagJson, flagList, flagNumber, flagString } from "../args.js";
 import { DaemonClient } from "../client.js";
 import { emit, fail, table } from "../output.js";
 
@@ -75,14 +76,25 @@ export type LaunchOptions = {
 	registerTimeoutMs?: number;
 	idleTimeoutMs?: number;
 	startTimeoutMs?: number;
+	/** Global settings that the host holds before the plugin starts. */
+	globalSettings?: JsonObject;
+	/** Environment variables for the plugin process. */
+	env?: NodeJS.ProcessEnv;
+	/** Path of a `.env` file for the plugin process. The daemon reads it, so its values are not stored in the session state. */
+	envFile?: string;
 };
 
 /** Starts a daemon for `session` and waits until it is ready. */
 export async function launchSession(session: string, options: LaunchOptions): Promise<Meta> {
 	validateSessionName(session);
 
+	if (options.envFile !== undefined && !existsSync(options.envFile)) {
+		throw new Error(`env file not found: ${options.envFile}`);
+	}
+
 	const directory = sessionDir(session);
-	mkdirSync(directory, { recursive: true });
+	mkdirSync(directory, { recursive: true, mode: 0o700 });
+	chmodSync(directory, 0o700);
 	const lock = acquireStartLock(session);
 
 	try {
@@ -101,8 +113,13 @@ export async function launchSession(session: string, options: LaunchOptions): Pr
 			nodePath: options.nodePath,
 			inspect: options.inspect === false ? false : undefined,
 			registerTimeoutMs: options.registerTimeoutMs,
+			globalSettings: options.globalSettings,
+			env: options.env,
+			envFile: options.envFile,
 		};
-		writeFileSync(`${directory}/start.json`, JSON.stringify(start, null, 2));
+		const startPath = join(directory, "start.json");
+		rmSync(startPath, { force: true });
+		writeFileSync(startPath, JSON.stringify(start, null, 2), { mode: 0o600 });
 
 		spawnDaemon(session).unref();
 
@@ -160,10 +177,15 @@ function spawnDaemon(session: string): ChildProcess {
 	});
 }
 
+export const START_USAGE =
+	"start <path-to-plugin-or-.sdPlugin> [--global-settings '<json>'] [--env '<json>'] [--dotenv PATH] [--device NAMES] [--node PATH] [--no-inspect] [--idle-timeout MIN] [--register-timeout MS] [--start-timeout MS]";
+
+export const CLOSE_USAGE = "close [--all] [--keep-artifacts]";
+
 export async function startCommand(args: Args): Promise<void> {
 	const pluginPath = args.positional[0];
 	if (pluginPath === undefined) {
-		fail("usage: sdtest -s=<session> start <path-to-plugin-or-.sdPlugin>");
+		fail(`usage: sdtest -s=<session> ${START_USAGE}`);
 	}
 
 	const options: LaunchOptions = {
@@ -188,6 +210,23 @@ export async function startCommand(args: Args): Promise<void> {
 	const startTimeoutMs = flagNumber(args, "start-timeout");
 	if (startTimeoutMs !== undefined) {
 		options.startTimeoutMs = startTimeoutMs;
+	}
+	const globalSettings = flagJson(args, "global-settings");
+	if (globalSettings !== undefined) {
+		options.globalSettings = globalSettings;
+	}
+	const env = flagJson(args, "env");
+	if (env !== undefined) {
+		try {
+			options.env = parsePluginEnv(env, "--env");
+		} catch (cause) {
+			fail(errorMessage(cause));
+		}
+	}
+
+	const envFile = flagString(args, "dotenv");
+	if (envFile !== undefined) {
+		options.envFile = resolve(envFile);
 	}
 
 	let meta: Meta;
@@ -240,10 +279,17 @@ async function waitForMeta(session: string, timeoutMs: number): Promise<Meta> {
 	}
 }
 
-/** Stops a session and removes its state. `keepArtifacts` keeps the screenshots and snapshots. */
-export async function closeSession(session: string, keepArtifacts = false): Promise<void> {
+export type ClosedArtifacts = { session: string; count: number; kept: boolean; path: string };
+
+/**
+ * Stops a session and removes its state. `keepArtifacts` keeps the screenshots and snapshots.
+ * Returns what became of the artifacts.
+ */
+export async function closeSession(session: string, keepArtifacts = false): Promise<ClosedArtifacts> {
 	validateSessionName(session);
 	const pid = readMeta(session)?.pid;
+	const path = artifactsDir(session);
+	const count = existsSync(path) ? readdirSync(path).length : 0;
 	try {
 		const client = await DaemonClient.connect(session);
 		await client.call("close");
@@ -256,6 +302,7 @@ export async function closeSession(session: string, keepArtifacts = false): Prom
 	if (process.platform !== "win32") {
 		rmSync(socketPath(session), { force: true });
 	}
+	return { session, count, kept: keepArtifacts && count > 0, path };
 }
 
 async function waitForExit(pid: number | undefined, timeoutMs: number): Promise<void> {
@@ -281,16 +328,30 @@ function removeSessionState(session: string, keepArtifacts: boolean): void {
 
 export async function closeCommand(args: Args): Promise<void> {
 	const targets = flagBool(args, "all") === true ? listSessions().map((entry) => entry.session) : [args.session];
+	const keep = flagBool(args, "keep-artifacts") === true;
 	const closed: string[] = [];
+	const artifacts: ClosedArtifacts[] = [];
 
 	for (const session of targets) {
-		await closeSession(session);
+		const result = await closeSession(session, keep);
 		closed.push(session);
+		if (result.count > 0) {
+			artifacts.push(result);
+		}
 	}
 
-	emit(compactJson({ closed }), (value) => {
-		const names = isJsonObject(value) && Array.isArray(value.closed) ? value.closed.filter((entry) => isJsonString(entry)) : [];
-		return names.length === 0 ? "no running sessions" : `closed: ${names.join(", ")}`;
+	emit(compactJson({ closed, artifacts: artifacts.map((entry) => compactJson(entry)) }), () => {
+		if (closed.length === 0) {
+			return "no running sessions";
+		}
+		return [
+			`closed: ${closed.join(", ")}`,
+			...artifacts.map((entry) =>
+				entry.kept
+					? `  ${entry.session}: kept ${entry.count} artifact(s) in ${entry.path}`
+					: `  ${entry.session}: deleted ${entry.count} artifact(s). Use --keep-artifacts to keep them.`,
+			),
+		].join("\n");
 	});
 }
 

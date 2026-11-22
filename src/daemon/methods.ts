@@ -410,6 +410,12 @@ export const methods = {
 		return compactJson({ clicked: requireStr(params, "target"), settings: session.host.settings.get(inspector.context) });
 	},
 
+	async piVisible({ session }: MethodContext, params: JsonObject): Promise<JsonValue> {
+		const target = requireStr(params, "target");
+		const state = await requireInspector(session).visibility(target);
+		return compactJson({ target, found: state.found, visible: state.visible });
+	},
+
 	async piScreenshot({ session }: MethodContext, params: JsonObject): Promise<JsonValue> {
 		const inspector = requireInspector(session);
 		const stem = str(params, "name") ?? `pi-${inspector.context.slice(0, 8)}`;
@@ -588,6 +594,7 @@ const CONCURRENT_METHODS: readonly string[] = [
 	"getGlobalSettings",
 	"piSnapshot",
 	"piFields",
+	"piVisible",
 	"piScreenshot",
 	"piConsole",
 	"events",

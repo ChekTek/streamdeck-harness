@@ -1,5 +1,5 @@
 import { join } from "node:path";
-import type { Page } from "playwright";
+import type { Locator, Page } from "playwright";
 
 import type { ActionInstance } from "../host/action.js";
 import {
@@ -52,6 +52,10 @@ declare global {
 
 /** Time between two readiness checks, in milliseconds. */
 const READY_POLL_MS = 10;
+
+/** Target prefixes that select the kind of match. */
+const CSS_PREFIX = "css=";
+const TEXT_PREFIX = "text=";
 
 /** A headless property inspector. Only one is open at a time. */
 export class Inspector {
@@ -134,11 +138,7 @@ export class Inspector {
 	}
 
 	public async click(target: string): Promise<void> {
-		const locator =
-			target.startsWith("#") || target.startsWith(".") || target.includes("[")
-				? this.#page.locator(target)
-				: this.#page.getByText(target, { exact: false });
-		await locator.first().click({ timeout: 5000 });
+		await this.#locate(target).click({ timeout: 5000 });
 	}
 
 	public async close(): Promise<void> {
@@ -353,6 +353,18 @@ export class Inspector {
 		return compactJson({ setting, value });
 	}
 
+	/** Tells if the first element that matches `target` exists and is shown. See `#locate` for the form of `target`. */
+	public async visibility(target: string): Promise<{ found: boolean; visible: boolean }> {
+		const locator = this.#locate(target);
+		if ((await locator.count()) === 0) {
+			return { found: false, visible: false };
+		}
+		const visible = await locator.evaluate((element) =>
+			element.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true }),
+		);
+		return { found: true, visible };
+	}
+
 	/** Waits until the page connects to the host. Returns false after `timeoutMs`. */
 	public async waitForConnect(timeoutMs: number): Promise<boolean> {
 		try {
@@ -396,6 +408,25 @@ export class Inspector {
 				await new Promise((done) => setTimeout(done, READY_POLL_MS));
 			}
 		}
+	}
+
+	/**
+	 * The first element that matches `target`. The prefix `css=` makes it a CSS selector and
+	 * `text=` makes it text in the page. Without a prefix, a target that starts with `#` or `.`,
+	 * or that contains `[`, is a CSS selector. Each other target is text.
+	 */
+	#locate(target: string): Locator {
+		if (target.startsWith(CSS_PREFIX)) {
+			return this.#page.locator(target.slice(CSS_PREFIX.length)).first();
+		}
+		if (target.startsWith(TEXT_PREFIX)) {
+			return this.#page.getByText(target.slice(TEXT_PREFIX.length), { exact: false }).first();
+		}
+		const locator =
+			target.startsWith("#") || target.startsWith(".") || target.includes("[")
+				? this.#page.locator(target)
+				: this.#page.getByText(target, { exact: false });
+		return locator.first();
 	}
 
 	/**

@@ -1,4 +1,5 @@
-import { openSync, readFileSync, writeFileSync } from "node:fs";
+import { openSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { parseEnv } from "node:util";
 
 import {
 	errorMessage,
@@ -9,6 +10,7 @@ import {
 	type JsonValue,
 	parseJsonValue,
 } from "../host/protocol.js";
+import { parsePluginEnv } from "../plugin/launch.js";
 import { daemonLogPath, metaPath, sessionDir, socketPath } from "./paths.js";
 import { Daemon } from "./server.js";
 import { Session, type SessionOptions } from "./session.js";
@@ -21,10 +23,12 @@ async function main(): Promise<void> {
 		process.exit(2);
 	}
 
-	const startPath = `${sessionDir(name)}/start.json`;
-	const options = parseStartFile(parseJsonValue(readFileSync(startPath, "utf8")), name);
-
 	try {
+		const startPath = `${sessionDir(name)}/start.json`;
+		const startText = readFileSync(startPath, "utf8");
+		rmSync(startPath, { force: true });
+		const options = parseStartFile(parseJsonValue(startText), name);
+
 		const session = await Session.start(options);
 		const daemon = new Daemon({ session, idleTimeoutMs: options.idleTimeoutMs ?? 15 * 60_000 });
 		await daemon.listen();
@@ -68,6 +72,19 @@ function parseStartFile(value: JsonValue, name: string): SessionOptions & { idle
 	}
 	if (isJsonNumber(value.idleTimeoutMs)) {
 		options.idleTimeoutMs = value.idleTimeoutMs;
+	}
+	if (isJsonObject(value.globalSettings)) {
+		options.globalSettings = value.globalSettings;
+	}
+	if (isJsonString(value.envFile)) {
+		try {
+			options.env = parseEnv(readFileSync(value.envFile, "utf8"));
+		} catch (cause) {
+			throw new Error(`could not read the env file ${value.envFile}: ${errorMessage(cause)}`, { cause });
+		}
+	}
+	if (isJsonObject(value.env)) {
+		options.env = { ...options.env, ...parsePluginEnv(value.env, "start.json env") };
 	}
 	if (Array.isArray(value.devices)) {
 		options.devices = value.devices.filter((entry) => isJsonString(entry));

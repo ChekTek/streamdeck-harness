@@ -13,6 +13,16 @@ steps:
     piOpen: clean
     timeout: 1000
 
+  - name: The heading is shown, and no error element exists
+    piVisible: Readiness fixture
+
+  - piHidden: "#error"
+
+  - name: A CSS selector without "#", "." or "[" needs the css= prefix
+    piVisible: css=body > h1
+
+  - piHidden: css=dialog
+
   - name: Type immediately after opening without a settle delay
     piType: label
     text: " ready"

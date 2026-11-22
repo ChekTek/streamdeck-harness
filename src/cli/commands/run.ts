@@ -10,11 +10,13 @@ import { DaemonClient } from "../client.js";
 import { emit, fail } from "../output.js";
 import { closeSession, launchSession } from "./sessions.js";
 
+export const RUN_USAGE = "run <scenario.yaml> [--keep] [--session NAME]";
+
 /** Runs a scenario file in its own session and prints one report. */
 export async function runCommand(args: Args): Promise<void> {
 	const file = args.positional[0];
 	if (file === undefined) {
-		fail("usage: sdtest run <scenario.yaml> [--keep] [--session NAME]");
+		fail(`usage: sdtest ${RUN_USAGE}`);
 	}
 
 	const path = resolve(file);
@@ -32,6 +34,9 @@ export async function runCommand(args: Args): Promise<void> {
 		devices:
 			scenario.device === undefined ? undefined : Array.isArray(scenario.device) ? scenario.device : [scenario.device],
 		nodePath: scenario.node,
+		globalSettings: scenario.globalSettings,
+		env: scenario.env,
+		envFile: scenario.dotenv === undefined ? undefined : resolvePath(scenario.dotenv, base),
 	};
 	const meta = await launchSession(session, launch).catch((cause: unknown) => {
 		fail(errorMessage(cause));
