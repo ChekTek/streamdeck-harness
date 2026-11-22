@@ -8,10 +8,11 @@ on:
 permissions:
   contents: read
 
-# Releases run one at a time, so the newest version is always published last.
+# Releases run one at a time and in order. Each push keeps its place in the queue.
 concurrency:
   group: release
   cancel-in-progress: false
+  queue: max
 
 jobs:
   check:

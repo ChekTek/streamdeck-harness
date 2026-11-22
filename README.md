@@ -18,6 +18,7 @@ To install from source:
 pnpm install
 pnpm build
 pnpm link --global
+sdtest install-browser
 ```
 
 ## Commands
