@@ -418,12 +418,12 @@ export class Inspector {
 		return this.#page.evaluate(async (budget) => {
 			type SdpiHost = Element & { updateComplete?: Promise<boolean> };
 			const bound = [...document.querySelectorAll("[setting]")];
-			const updatesComplete =
-				(await Promise.race([
-					// SAFETY: SDPI elements have updateComplete. lib.dom does not declare it.
-					Promise.allSettled(bound.map((element) => (element as SdpiHost).updateComplete)),
-					new Promise<false>((done) => setTimeout(done, budget, false)),
-				])) !== false;
+			const updates = await Promise.race([
+				// SAFETY: SDPI elements have updateComplete. lib.dom does not declare it.
+				Promise.allSettled(bound.map((element) => (element as SdpiHost).updateComplete)),
+				new Promise<false>((done) => setTimeout(done, budget, false)),
+			]);
+			const updatesComplete = updates !== false && updates.every(({ status }) => status === "fulfilled");
 			return {
 				connected: window.__sdtestConnected === true,
 				traffic: window.__sdtestTraffic ?? { received: 0, sent: 0 },
