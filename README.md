@@ -49,6 +49,23 @@ sdtest -s=demo close
 - A session stops after 15 minutes without use. Change this with `--idle-timeout`.
 - `sdtest list` shows the sessions.
 
+### Plugin copy
+
+`start` copies the `.sdPlugin` folder into the session directory and runs the plugin from the
+copy. The session reads the manifest, the images, the property inspector and the logs from the
+copy.
+
+- The plugin writes its logs in the copy. The `logs` folder of the source is not copied and
+  does not change. `logs` shows only the lines of the session.
+- The source files are not in use. You can build the plugin again while the session is open.
+  Start a new session to test the new build.
+- A link in the folder is copied as a link. The harness does not read its target.
+- `close` removes the copy and the files that the plugin wrote in it. After a failed start,
+  the logs of the copy stay until the next `start` or `close`.
+- `start --in-place` runs the plugin from the source folder. Use it to see changes to the
+  property inspector files without a new session.
+- `lint-svg` reads the path that you give it.
+
 ## Scenarios
 
 A scenario file runs a full check in one command. The exit code is not zero when a step fails.

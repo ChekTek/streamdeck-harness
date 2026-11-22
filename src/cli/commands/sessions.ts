@@ -72,6 +72,7 @@ export type LaunchOptions = {
 	devices?: string[];
 	nodePath?: string;
 	inspect?: boolean;
+	inPlace?: boolean;
 	registerTimeoutMs?: number;
 	idleTimeoutMs?: number;
 	startTimeoutMs?: number;
@@ -100,6 +101,7 @@ export async function launchSession(session: string, options: LaunchOptions): Pr
 			idleTimeoutMs: options.idleTimeoutMs ?? 15 * 60_000,
 			nodePath: options.nodePath,
 			inspect: options.inspect === false ? false : undefined,
+			inPlace: options.inPlace === true ? true : undefined,
 			registerTimeoutMs: options.registerTimeoutMs,
 		};
 		writeFileSync(`${directory}/start.json`, JSON.stringify(start, null, 2));
@@ -163,7 +165,7 @@ function spawnDaemon(session: string): ChildProcess {
 export async function startCommand(args: Args): Promise<void> {
 	const pluginPath = args.positional[0];
 	if (pluginPath === undefined) {
-		fail("usage: sdtest -s=<session> start <path-to-plugin-or-.sdPlugin>");
+		fail("usage: sdtest -s=<session> start <path-to-plugin-or-.sdPlugin> [--in-place]");
 	}
 
 	const options: LaunchOptions = {
@@ -180,6 +182,9 @@ export async function startCommand(args: Args): Promise<void> {
 	}
 	if (flagBool(args, "inspect") === false) {
 		options.inspect = false;
+	}
+	if (flagBool(args, "in-place") === true) {
+		options.inPlace = true;
 	}
 	const registerTimeoutMs = flagNumber(args, "register-timeout");
 	if (registerTimeoutMs !== undefined) {
@@ -210,6 +215,7 @@ export async function startCommand(args: Args): Promise<void> {
 			`plugin    ${String(row.plugin)} ${String(row.version)} (${String(row.uuid)})`,
 			`runtime   ${String(row.runtime)}${row.inspector === null || row.inspector === undefined ? "" : " + inspector"}`,
 			`pid       ${String(row.pid)}   host port ${String(row.port)}`,
+			`root      ${String(row.root)}${row.root === row.source ? " (in place)" : ""}`,
 			`artifacts ${String(row.artifacts)}`,
 			"",
 			"actions:",

@@ -23,6 +23,11 @@ export function artifactsDir(session: string): string {
 	return join(sessionDir(session), "artifacts");
 }
 
+/** Directory that holds the session's copy of the `.sdPlugin` folder. */
+export function pluginCopyDir(session: string): string {
+	return join(sessionDir(session), "plugin");
+}
+
 /**
  * Address of the daemon socket. macOS limits socket paths to about 104 bytes, so a long
  * path falls back to a short name in the temp directory.

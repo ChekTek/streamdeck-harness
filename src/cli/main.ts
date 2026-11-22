@@ -574,7 +574,7 @@ const REMOTE = {
 	},
 	logs: {
 		method: "logs",
-		summary: "Read the plugin's own log files under <sdPlugin>/logs.",
+		summary: "Read the log files that the running plugin writes under <root>/logs.",
 		usage: "logs [--level ERROR,WARN] [--limit N] [--since-start false]",
 		params: (args: Args): JsonObject =>
 			compactJson({
@@ -623,7 +623,7 @@ function remoteFor(verb: string): Remote | undefined {
 
 function helpText(): string {
 	const rows = [
-		["start <path>", "Launch a plugin headlessly and hold it open in a background daemon."],
+		["start <path> [--in-place]", "Launch a copy of a plugin headlessly and hold it open in a background daemon."],
 		["close [--all]", "Stop a session (or every session) and clean up."],
 		["list", "List sessions."],
 		["lint-svg <paths>", "Check SVGs against SVG Tiny 1.2 and the Stream Deck renderer (no session needed)."],

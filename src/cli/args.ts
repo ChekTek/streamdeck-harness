@@ -15,6 +15,7 @@ const BOOLEAN_FLAGS = new Set([
 	"appear",
 	"full-page",
 	"heap-snapshot",
+	"in-place",
 	"inspect",
 	"json",
 	"keep",

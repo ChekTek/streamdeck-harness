@@ -63,6 +63,9 @@ function parseStartFile(value: JsonValue, name: string): SessionOptions & { idle
 	if (isJsonBoolean(value.inspect)) {
 		options.inspect = value.inspect;
 	}
+	if (isJsonBoolean(value.inPlace)) {
+		options.inPlace = value.inPlace;
+	}
 	if (isJsonNumber(value.registerTimeoutMs)) {
 		options.registerTimeoutMs = value.registerTimeoutMs;
 	}
