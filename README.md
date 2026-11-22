@@ -99,6 +99,12 @@ sdtest -s=fix close
 
 Start a new session for each check. A leaking action adds noise to the next check.
 
+## Release
+
+Each push to `main` stages a new version on npm and creates a GitHub release. The version is
+public on npm after a maintainer approves it. The major and minor numbers come from
+`package.json`. The run number of the workflow is the patch number.
+
 ## License
 
 MIT
