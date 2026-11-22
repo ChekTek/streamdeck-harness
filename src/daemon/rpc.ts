@@ -42,7 +42,7 @@ export function parseRpcRequest(value: JsonValue): RpcRequest | undefined {
 	};
 }
 
-/** Newline-delimited JSON framing, shared by the daemon and the CLI client. */
+/** Reads newline-delimited JSON frames from `socket`. */
 export function readFrames(socket: Socket, onFrame: (value: JsonValue) => void): void {
 	let buffer = "";
 	socket.setEncoding("utf8");
@@ -56,7 +56,7 @@ export function readFrames(socket: Socket, onFrame: (value: JsonValue) => void):
 				try {
 					onFrame(parseJsonValue(line));
 				} catch {
-					// A malformed frame is dropped; the peer's request simply times out.
+					// Ignore a malformed frame. The request then times out.
 				}
 			}
 			index = buffer.indexOf("\n");

@@ -7,18 +7,18 @@ import { parseDataUri } from "./data-uri.js";
 import { type LintResult, lintSvg } from "./svg-tiny.js";
 
 export type KeyImage = {
-	/** Where the pixels came from. */
+	/** Source of the image. */
 	origin: "manifest" | "none" | "setImage";
-	/** `data:` URI the page can load directly. */
+	/** `data:` URI that the page can load. */
 	dataUri: string | undefined;
-	/** Absolute path when the image resolved to a file on disk. */
+	/** Absolute path, when the image is a file. */
 	path: string | undefined;
 	mimeType: string | undefined;
-	/** Decoded SVG markup, when the image is an SVG. Cheaper for an agent to read than a screenshot. */
+	/** SVG markup, when the image is an SVG. */
 	svg: string | undefined;
-	/** Tiny 1.2 lint of that markup. */
+	/** Lint result for the SVG markup. */
 	lint: LintResult | undefined;
-	/** Set when the image could not be resolved at all. */
+	/** Error text, when the image is not available. */
 	error: string | undefined;
 };
 
@@ -40,10 +40,7 @@ function mimeFor(extension: string): string {
 	return "application/octet-stream";
 }
 
-/**
- * Resolves what a key is currently showing: a `setImage` override if the plugin set one,
- * otherwise the manifest image for the current state.
- */
+/** Finds the image that a key shows: the `setImage` value, or the manifest image for the current state. */
 export function resolveKeyImage(project: PluginProject, instance: ActionInstance): KeyImage {
 	const override = instance.effectiveImage?.image;
 	if (override !== undefined) {
@@ -90,9 +87,8 @@ function fromDataUri(uri: string): KeyImage {
 }
 
 /**
- * Re-encodes decoded SVG markup for the screenshot page. Stream Deck decodes the payload and
- * renders the markup, so a raw `#` in a colour is drawn; a browser would instead read it as
- * the start of a URL fragment and drop the rest of the image.
+ * Encodes SVG markup for the screenshot page. Stream Deck draws a raw `#`, but a browser
+ * reads it as a URL fragment.
  */
 function svgDataUri(svg: string): string {
 	return `data:image/svg+xml;base64,${Buffer.from(svg, "utf8").toString("base64")}`;
@@ -122,12 +118,8 @@ function fromFile(project: PluginProject, relative: string, origin: "manifest" |
 }
 
 /**
- * Builds the page the screenshot is taken from: the key image with the title composited on
- * top the way Stream Deck draws it.
- *
- * The title layer is an approximation. Stream Deck rasterises titles with Qt at a font size
- * expressed against a 72px key, so the size is scaled by `size / 72`; its subtle text shadow
- * and glyph hinting are not reproduced.
+ * Builds the HTML page for the screenshot: the key image with the title on top. The title is
+ * an estimate of the Stream Deck text.
  */
 export function keyHtml(instance: ActionInstance, image: KeyImage, size: number): string {
 	const parameters = instance.titleParameters;

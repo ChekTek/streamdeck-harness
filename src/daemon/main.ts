@@ -13,10 +13,7 @@ import { daemonLogPath, metaPath, sessionDir, socketPath } from "./paths.js";
 import { Daemon } from "./server.js";
 import { Session, type SessionOptions } from "./session.js";
 
-/**
- * Detached daemon entry point. Started by `sdtest start`; never invoked by hand.
- * Everything it owns is headless, so the user keeps their desktop while it runs.
- */
+/** Daemon entry point. `sdtest start` starts this process. */
 async function main(): Promise<void> {
 	const name = process.argv[2];
 	if (name === undefined) {
@@ -44,8 +41,7 @@ async function main(): Promise<void> {
 		for (const signal of ["SIGINT", "SIGTERM"] as const) {
 			process.on(signal, () => void daemon.shutdown(signal));
 		}
-		// A plugin that crashes mid-session leaves the daemon up so the transcript and
-		// logs stay readable; `sdtest output` reports the exit.
+		// A plugin crash does not stop the daemon, so the logs stay readable.
 	} catch (cause) {
 		writeFileSync(
 			metaPath(name),
@@ -84,12 +80,11 @@ function writeLog(chunk: Uint8Array | string): boolean {
 	return true;
 }
 
-// Route daemon output to a file: the parent detaches from stdio immediately.
+// The parent closes stdio, so the output goes to a file.
 const log = openSync(daemonLogPath(process.argv[2] ?? "unknown"), "a");
-// SAFETY: Node's WriteStream.write overloads include encoding/callback variants the daemon does
-// not use; this intercept only needs the chunk so it can append it to the session log.
+// SAFETY: the daemon uses only the chunk argument of `write`.
 process.stdout.write = writeLog as typeof process.stdout.write;
-// SAFETY: same write intercept as stdout; stderr is redirected into the same session log file.
+// SAFETY: same as stdout.
 process.stderr.write = writeLog as typeof process.stderr.write;
 
 void main();

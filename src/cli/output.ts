@@ -14,10 +14,7 @@ export function print(text: string): void {
 	process.stdout.write(`${text}\n`);
 }
 
-/**
- * Prints `value` as JSON when `--json` is set, otherwise renders `human`. Agents get
- * structured output; a person reading the terminal gets something scannable.
- */
+/** Prints `value` as JSON with `--json`. Otherwise prints the `human` text. */
 export function emit(value: JsonValue, human: (value: JsonValue) => string): void {
 	if (jsonMode) {
 		print(JSON.stringify(value, null, 2));

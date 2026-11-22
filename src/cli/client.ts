@@ -4,7 +4,7 @@ import { socketPath } from "../daemon/paths.js";
 import { isRpcResponse, readFrames, writeFrame } from "../daemon/rpc.js";
 import { type JsonObject, type JsonValue } from "../host/protocol.js";
 
-/** Short-lived connection to a session daemon. One per CLI invocation. */
+/** Connection to a session daemon for one CLI call. */
 export class DaemonClient {
 	readonly #socket: Socket;
 	readonly #pending = new Map<number, { resolve: (value: JsonValue) => void; reject: (reason: Error) => void }>();

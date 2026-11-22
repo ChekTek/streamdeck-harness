@@ -13,7 +13,7 @@
         { "Platform": "mac", "MinimumVersion": "12" },
         { "Platform": "windows", "MinimumVersion": "10" }
     ],
-    "Nodejs": { "Version": "20" },
+    "Nodejs": { "Version": "24" },
     "Actions": [
         {
             "Name": "Clean",

@@ -2,7 +2,7 @@ import type { ManifestAction, ManifestState } from "../plugin/manifest.js";
 import type { Device } from "./device.js";
 import type { Controller, Coordinates, Target, TitleParameters } from "./protocol.js";
 
-/** Default title parameters Stream Deck reports when the manifest overrides nothing. */
+/** Title parameters that Stream Deck uses when the manifest sets none. */
 const DEFAULT_TITLE_PARAMETERS: TitleParameters = {
 	fontFamily: "",
 	fontSize: 12,
@@ -14,7 +14,7 @@ const DEFAULT_TITLE_PARAMETERS: TitleParameters = {
 };
 
 export type ImageOverride = {
-	/** The raw `setImage` payload value: a data URI, a manifest-relative path, or undefined to revert. */
+	/** The `setImage` value: a data URI, a path relative to the manifest, or undefined to reset. */
 	image: string | undefined;
 	target: Target;
 	state: number | undefined;
@@ -25,10 +25,7 @@ export type Flash = {
 	at: number;
 };
 
-/**
- * One action instance on the emulated device -- the harness equivalent of a key placed on
- * a profile. Holds everything the plugin has set on it so a key can be rendered and asserted.
- */
+/** One action instance on the emulated device. It holds all that the plugin set on the key. */
 export class ActionInstance {
 	public readonly context: string;
 	public readonly controller: Controller;
@@ -36,7 +33,7 @@ export class ActionInstance {
 	public readonly definition: ManifestAction;
 
 	public readonly device: Device;
-	/** Seq of the `willDisappear` most recently sent, used by the lifecycle check. */
+	/** Sequence number of the last `willDisappear`. */
 	public disappearedAtSeq: number | undefined;
 	public readonly flashes: Flash[] = [];
 
@@ -46,15 +43,15 @@ export class ActionInstance {
 
 	public state = 0;
 
-	/** Title set by the user or by `setTitle`; undefined falls back to the manifest state's title. */
+	/** Title from the user or `setTitle`. When undefined, the manifest title applies. */
 	public title: string | undefined;
 
-	/** Per-state title override set via `setTitle`; index 0 is used for single-state actions. */
+	/** Title per state from `setTitle`. Single-state actions use index 0. */
 	public readonly titleByState = new Map<number, string>();
 
 	public readonly uuid: string;
 
-	/** Whether the plugin currently believes this instance is on screen. */
+	/** True while the plugin thinks the instance is on screen. */
 	public visible = false;
 
 	constructor(options: {
@@ -83,7 +80,7 @@ export class ActionInstance {
 		return this.imageByState.get(this.state);
 	}
 
-	/** Effective title for the current state: a `setTitle` override, else the manifest state's default. */
+	/** Title for the current state. */
 	public get effectiveTitle(): string {
 		return this.titleByState.get(this.state) ?? this.title ?? this.manifestState?.Title ?? "";
 	}
@@ -96,10 +93,7 @@ export class ActionInstance {
 		return Math.max(this.definition.States?.length ?? 1, 1);
 	}
 
-	/**
-	 * Title parameters as Stream Deck computes them: defaults, overlaid with the manifest
-	 * state's typography fields.
-	 */
+	/** Title parameters: the defaults plus the manifest values for the current state. */
 	public get titleParameters(): TitleParameters {
 		const state = this.manifestState;
 		return {

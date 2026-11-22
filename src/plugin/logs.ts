@@ -1,7 +1,7 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 
-/** `2026-08-17T17:11:04.308Z DEBUG ...` -- the format the Stream Deck SDK loggers write. */
+/** Matches an SDK log line: timestamp, level, text. Example: `2026-08-17T17:11:04.308Z DEBUG ...`. */
 const LOG_LINE = /^(\d{4}-\d{2}-\d{2}T[\d:.]+Z)\s+(TRACE|DEBUG|INFO|WARN|ERROR)\s+(.*)$/;
 
 export type LogLine = {
@@ -11,10 +11,7 @@ export type LogLine = {
 	text: string;
 };
 
-/**
- * Reads the plugin's own rotating log files under `<sdPlugin>/logs`. Stream Deck SDK
- * plugins write these themselves; they carry stack traces the WebSocket transcript never sees.
- */
+/** Reads the log files of the plugin in `<sdPlugin>/logs`. */
 export function readPluginLogs(root: string, options: { sinceMs?: number; level?: string[] } = {}): LogLine[] {
 	const directory = join(root, "logs");
 	if (!existsSync(directory)) {
@@ -25,7 +22,7 @@ export function readPluginLogs(root: string, options: { sinceMs?: number; level?
 		.filter((name) => name.endsWith(".log"))
 		.map((name) => join(directory, name))
 		.filter((path) => statSync(path).isFile())
-		// `<uuid>.0.log` is the newest; sort oldest-first so the result reads chronologically.
+		// Sort from oldest to newest.
 		.sort((a, b) => statSync(a).mtimeMs - statSync(b).mtimeMs);
 
 	const lines: LogLine[] = [];
@@ -50,10 +47,7 @@ export function readPluginLogs(root: string, options: { sinceMs?: number; level?
 	return lines;
 }
 
-/**
- * The first `limit` error lines since `sinceMs`. Mirrors the project rule to check the
- * first 15 lines of `*.sdPlugin/logs` for critical errors after a rebuild.
- */
+/** Returns the first `limit` error lines after `sinceMs`. */
 export function readPluginErrors(root: string, sinceMs?: number, limit = 15): LogLine[] {
 	if (sinceMs === undefined) {
 		return readPluginLogs(root, { level: ["ERROR"] }).slice(0, limit);

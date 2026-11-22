@@ -77,10 +77,7 @@ export type LaunchOptions = {
 	startTimeoutMs?: number;
 };
 
-/**
- * Starts a detached daemon for `session` and waits for it to report ready. Shared by the
- * `start` command and the scenario runner.
- */
+/** Starts a daemon for `session` and waits until it is ready. */
 export async function launchSession(session: string, options: LaunchOptions): Promise<Meta> {
 	validateSessionName(session);
 
@@ -115,11 +112,7 @@ export async function launchSession(session: string, options: LaunchOptions): Pr
 	}
 }
 
-/**
- * Claims `session` for this launcher until its daemon reports ready or failed, so two
- * concurrent starts cannot both spawn a plugin under one name. A lock left by a launcher
- * that has since died is taken over.
- */
+/** Locks `session` so that two starts cannot run at the same time. Takes over the lock of a dead process. */
 function acquireStartLock(session: string): string {
 	const path = join(sessionDir(session), "start.lock");
 	for (let attempt = 0; attempt < 2; attempt++) {
@@ -151,11 +144,8 @@ function readLockHolder(path: string): number | undefined {
 }
 
 /**
- * Starts the daemon so it outlives the CLI. On Windows `detached: true` leaves it with no
- * console at all, so every console program below it (Chromium, taskkill, PowerShell) opens
- * a visible terminal. `start /b` instead runs it in the hidden console of a short-lived
- * `cmd.exe`, outside the CLI's kill-on-exit job, and everything the daemon spawns inherits
- * that console.
+ * Starts the daemon so that it stays alive after the CLI exits. On Windows, `start /b` gives
+ * the daemon a hidden console. With `detached: true`, each child program opens a terminal.
  */
 function spawnDaemon(session: string): ChildProcess {
 	if (process.platform !== "win32") {
@@ -250,11 +240,7 @@ async function waitForMeta(session: string, timeoutMs: number): Promise<Meta> {
 	}
 }
 
-/**
- * Stops a session, waits for its daemon to exit, and removes its state directory. Safe to
- * call when nothing is running. With `keepArtifacts`, screenshots and snapshots the session
- * wrote stay on disk.
- */
+/** Stops a session and removes its state. `keepArtifacts` keeps the screenshots and snapshots. */
 export async function closeSession(session: string, keepArtifacts = false): Promise<void> {
 	validateSessionName(session);
 	const pid = readMeta(session)?.pid;
@@ -264,7 +250,7 @@ export async function closeSession(session: string, keepArtifacts = false): Prom
 		client.close();
 		await waitForExit(pid, 10_000);
 	} catch {
-		// Already gone; fall through to cleaning up its directory.
+		// The daemon is gone. Remove its directory.
 	}
 	removeSessionState(session, keepArtifacts);
 	if (process.platform !== "win32") {

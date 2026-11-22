@@ -23,10 +23,7 @@ function collect(target: string, into: string[]): void {
 	}
 }
 
-/**
- * Lints SVGs against SVG Tiny 1.2 and the Stream Deck renderer. Runs without a session:
- * it is static analysis, not a live check.
- */
+/** Lints SVG files against SVG Tiny 1.2 and the Stream Deck renderer. No session is necessary. */
 export function lintCommand(args: Args): void {
 	const inputs = args.positional.length > 0 ? args.positional : ["."];
 	const files: string[] = [];
@@ -34,7 +31,7 @@ export function lintCommand(args: Args): void {
 	for (const input of inputs) {
 		const target = resolve(input);
 		try {
-			// A plugin root is the common case; lint its shipped artwork rather than its source tree.
+			// For a plugin root, lint only the `imgs` folder.
 			collect(statSync(target).isDirectory() ? tryPluginImages(target) : target, files);
 		} catch (cause) {
 			fail(errorMessage(cause));
@@ -63,7 +60,7 @@ export function lintCommand(args: Args): void {
 	}
 }
 
-/** Narrows a plugin project to its `imgs` folder when one exists, so source trees are not scanned. */
+/** Returns the `imgs` folder of a plugin when there is one. */
 function tryPluginImages(target: string): string {
 	try {
 		const root = findPluginRoot(target);

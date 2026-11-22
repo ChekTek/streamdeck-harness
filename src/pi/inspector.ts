@@ -14,10 +14,7 @@ import type { PluginProject } from "../plugin/manifest.js";
 import { getBrowser } from "../render/chromium.js";
 import { StaticServer } from "./static-server.js";
 
-/**
- * Width of the property inspector panel. Stream Deck renders the PI inside a fixed-width
- * QtWebEngine view; this is an approximation and is configurable per screenshot.
- */
+/** Default width of the property inspector. This is an estimate of the Stream Deck panel. */
 export const DEFAULT_PI_WIDTH = 345;
 export const DEFAULT_PI_HEIGHT = 600;
 
@@ -33,10 +30,7 @@ export type OpenOptions = {
 
 export type ConsoleLine = { type: string; text: string };
 
-/**
- * A property inspector rendered headlessly. One at a time, like the real application, which
- * only ever shows the PI of the selected key.
- */
+/** A headless property inspector. Only one is open at a time. */
 export class Inspector {
 	public readonly consoleLines: ConsoleLine[] = [];
 
@@ -129,17 +123,13 @@ export class Inspector {
 		await this.#server.close();
 	}
 
-	/**
-	 * Lists the SDPI components on the page by their `setting` attribute, with the value and
-	 * visibility each currently has. Components live in shadow roots, so this reads them from
-	 * inside the page rather than through the accessibility tree.
-	 */
+	/** Lists the SDPI components that have a `setting` attribute, with their values. */
 	public async fields(): Promise<JsonObject[]> {
 		const rows = await this.#page.evaluate(() => {
 			type SdpiHost = HTMLElement & { disabled?: boolean; value?: boolean | number | string | null };
 			return [...document.querySelectorAll("[setting]")].map((element) => {
 				const item = element.closest("sdpi-item");
-				// SAFETY: SDPI custom elements publish `value` and `disabled` on the host; lib.dom does not.
+				// SAFETY: SDPI elements have `value` and `disabled`. lib.dom does not declare them.
 				const host = element as SdpiHost;
 				return {
 					setting: element.getAttribute("setting"),
@@ -174,15 +164,8 @@ export class Inspector {
 	}
 
 	/**
-	 * Writes a value into an SDPI component by its `setting` attribute. Setting `.value` is
-	 * what the component's own bindings observe; typing into the shadow DOM is unreliable.
-	 */
-	/**
-	 * Writes a value into an SDPI component by its `setting` attribute, driving the inner
-	 * control the way a user would. SDPI exposes `focusElement` as a Lit ref (`{ value }`),
-	 * not an element, and page code commonly listens on that inner control -- so setting the
-	 * custom element's `value` alone would save the setting without running the page's own
-	 * change handlers.
+	 * Sets an SDPI component by its `setting` attribute. It changes the inner control, so the
+	 * change handlers of the page run.
 	 */
 	public async setField(setting: string, value: JsonValue): Promise<JsonObject> {
 		const result = await this.#page.evaluate(
@@ -203,7 +186,7 @@ export class Inspector {
 					};
 				}
 
-				// SAFETY: SDPI custom elements publish value/focusElement/updateComplete on the host.
+				// SAFETY: SDPI elements have value, focusElement and updateComplete.
 				const element = node as SdpiHost;
 				await element.updateComplete?.catch(() => undefined);
 
@@ -249,7 +232,7 @@ export class Inspector {
 		return this.#page.locator("body").ariaSnapshot();
 	}
 
-	/** Resolves once the page has called `connectElgatoStreamDeckSocket`. */
+	/** Waits until the page connects to the host. Returns false after `timeoutMs`. */
 	public async waitForConnect(timeoutMs: number): Promise<boolean> {
 		try {
 			await this.#page.waitForFunction("window.__sdtestConnected === true", undefined, {
@@ -263,10 +246,8 @@ export class Inspector {
 }
 
 /**
- * Runs before any page script. SDPI's bundle reads any pre-existing
- * `window.connectElgatoStreamDeckSocket` and then assigns its own implementation, so the
- * harness cannot simply define the global up front, and polling for it races page load.
- * Installing an accessor lets the harness call the implementation the instant it appears.
+ * Script that runs before the page scripts. SDPI replaces `connectElgatoStreamDeckSocket`,
+ * so an accessor calls the new function when the page assigns it.
  */
 function bootstrapScript(hostPort: number, uuid: string, info: RegistrationInfo, actionInfo: JsonObject): string {
 	const args = [String(hostPort), uuid, "registerPropertyInspector", JSON.stringify(info), JSON.stringify(actionInfo)];
@@ -304,8 +285,7 @@ function bootstrapScript(hostPort: number, uuid: string, info: RegistrationInfo,
     set(value) { implementation = value; ready(invoke); },
   });
 
-  // Stream Deck exposes its theme colours to the property inspector; reproduce them so
-  // screenshots are not styled against browser defaults.
+  // Apply the Stream Deck theme colours to the page.
   ready(() => {
     const style = document.createElement("style");
     style.textContent = ":root {" + Object.entries(colors).map(([k, v]) => "--" + k.replace(/[A-Z]/g, (c) => "-" + c.toLowerCase()) + ":" + v).join(";") + "}";

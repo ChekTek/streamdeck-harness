@@ -1,7 +1,4 @@
-/**
- * Declarative scenario format. One file describes a whole check -- launch, place actions,
- * interact, assert -- so an agent can run it with a single call instead of thirty round trips.
- */
+/** Scenario file format. One file describes a full check: start, add actions, interact, assert. */
 
 import {
 	isJsonBoolean,
@@ -13,7 +10,7 @@ import {
 } from "../host/protocol.js";
 
 export type Expectation = {
-	/** Assert on a key's current visual state. */
+	/** Asserts the visual state of a key. */
 	key?: string;
 	state?: number;
 	title?: string;
@@ -21,25 +18,25 @@ export type Expectation = {
 	visible?: boolean;
 	imageSource?: "manifest" | "none" | "setImage";
 
-	/** Assert that an action's settings contain these entries. */
+	/** Asserts that the settings of an action contain these entries. */
 	settingsOf?: string;
 	settingsContain?: JsonObject;
 	globalSettingsContain?: JsonObject;
 
-	/** Assert on the recorded transcript. */
+	/** Asserts the recorded events. */
 	events?: Array<{ event: string; context?: string; action?: string; min?: number; max?: number }>;
 
-	/** Assert on harness-detected violations. */
+	/** Asserts the violations that the harness found. */
 	noViolations?: boolean;
 	maxViolations?: number;
 	violationKinds?: string[];
 
-	/** Assert on the plugin's own log files. */
+	/** Asserts the log files of the plugin. */
 	maxLogErrors?: number;
 };
 
 export type Step = {
-	/** Optional label used in the report. */
+	/** Label for the report. */
 	name?: string;
 
 	add?: string;
@@ -284,11 +281,7 @@ const KEY_ASSERTIONS = ["state", "title", "titleMatches", "visible", "imageSourc
 
 const EXPECTED_EVENT_KEYS = ["event", "context", "action", "min", "max"] as const satisfies Array<keyof ExpectedEvent>;
 
-/**
- * Parses an `expect` block strictly: an unknown key, a wrong value type, or an assertion
- * missing the field that names its target is an error, because silently dropping it would
- * turn the intended assertion into a pass.
- */
+/** Parses an `expect` block. An unknown key, a wrong type, or a missing target is an error. */
 function parseExpectation(value: JsonObject, source: string): Expectation {
 	rejectUnknownKeys(value, EXPECTATION_KEYS, source);
 

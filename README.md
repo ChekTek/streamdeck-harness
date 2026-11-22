@@ -1,111 +1,96 @@
 # streamdeck-harness
 
-Headless test harness for Stream Deck plugins. It mocks the Stream Deck backend, launches
-the real plugin process, and drives it from a CLI — so a plugin can be exercised without
-installing it, without a device, and without taking over the desktop.
+A headless test harness for Stream Deck plugins. It runs the real plugin against a mock
+Stream Deck. You do not need a device, and the Stream Deck app is not affected.
 
-Everything runs detached and headless. The harness never links into Stream Deck's plugins
-folder and never emits a `streamdeck://` URL, so a running Stream Deck app is unaffected.
+## Install
+
+Node.js 24 or later is necessary.
+
+```bash
+npm install -g @chektek/streamdeck-harness
+sdtest install-browser    # downloads Chromium one time
+```
+
+To install from source:
 
 ```bash
 pnpm install
 pnpm build
-pnpm browser          # one-time: download Chromium for Playwright
-pnpm link --global    # optional: put `sdtest` on PATH
+pnpm link --global
+sdtest install-browser
 ```
 
-## What it checks
+## Commands
 
-| Question | Command |
-|---|---|
-| What does this key actually render? | `screenshot` |
-| Will this artwork survive Stream Deck's renderer? | `lint-svg` |
-| Does the action release what `onWillAppear` acquired? | `check-lifecycle` |
-| Does the property inspector work, and what does it save? | `pi-open`, `pi-set`, `pi-fields` |
-| What did the plugin actually say over the wire? | `events`, `violations`, `logs` |
+| Task                                           | Command                          |
+| ---------------------------------------------- | -------------------------------- |
+| See what a key shows                           | `screenshot`                     |
+| Check SVG files for Stream Deck                | `lint-svg`                       |
+| Find resources that an action does not release | `check-lifecycle`                |
+| Test the property inspector                    | `pi-open`, `pi-set`, `pi-fields` |
+| Read the messages and logs                     | `events`, `violations`, `logs`   |
+
+Run `sdtest help` for the full list. Add `--json` to a command for JSON output.
 
 ## Sessions
 
-A session is a detached daemon holding one plugin process, the mock host, and a headless
-Chromium. Commands are short-lived clients against it, like `playwright-cli`.
+A session is a background process that holds one plugin. Each command connects to it.
 
 ```bash
-sdtest -s=scp start ~/Code/plugin-steam-connect-pro
-sdtest -s=scp add com.chektek.steam-connect-pro.status --settings '{"mode":"set","status":"online"}'
-sdtest -s=scp press com.chektek.steam-connect-pro.status
-sdtest -s=scp screenshot com.chektek.steam-connect-pro.status
-sdtest -s=scp close
+sdtest -s=demo start path/to/plugin
+sdtest -s=demo add com.example.plugin.action --settings '{"mode":"set"}'
+sdtest -s=demo press com.example.plugin.action
+sdtest -s=demo screenshot com.example.plugin.action
+sdtest -s=demo close
 ```
 
-Add `--json` to any command for machine-readable output. Sessions self-terminate after
-`--idle-timeout` minutes (default 15). `sdtest list` shows what is running.
-
-An action is referenced by its context id, or by its action UUID when only one instance of
-it exists — which is the usual case.
+- Refer to an action by its context id, or by its action UUID when only one instance exists.
+- A session stops after 15 minutes without use. Change this with `--idle-timeout`.
+- `sdtest list` shows the sessions.
 
 ## Scenarios
 
-A whole check in one call, which is the right shape for CI and for agents:
+A scenario file runs a full check in one command. The exit code is not zero when a step fails.
 
 ```bash
-sdtest run examples/steam-connect-pro.yaml
+sdtest run examples/lifecycle-fixture.yaml
 ```
 
-See [examples/steam-connect-pro.yaml](examples/steam-connect-pro.yaml) for the step and
-assertion vocabulary. Exit code is non-zero when any step fails.
+See [examples](examples) for the steps and assertions.
 
-## What the mock implements
+## Mock host
 
-The full SDK v3 plugin and property-inspector protocol: every documented event and command,
-plus `resources`, `secrets`, and the optional `id` used by experimental message identifiers.
-Unknown events are recorded rather than dropped.
+The mock supports the SDK v3 protocol for plugins and property inspectors. It records
+unknown events.
 
-Two behaviours are worth calling out because plugins depend on them:
+- A request with an `id` gets a response with the same `id`.
+- `setSettings` from the plugin notifies only the property inspector. `setSettings` from the
+  property inspector notifies only the plugin.
+- Not supported: dials, multi-actions and profile switching. The mock records these commands
+  but does nothing.
 
-- **`id` echo.** A `getSettings` / `getGlobalSettings` / `getResources` / `getSecrets`
-  carrying an `id` gets its response tagged with the same `id`. Plugins that set
-  `useExperimentalMessageIdentifiers = true` deadlock at startup without this.
-- **Settings propagate to the other side only.** A plugin's `setSettings` notifies the
-  property inspector, not the plugin; the inspector's `setSettings` notifies the plugin.
-  This is what makes the "never write settings back from `onDidReceiveSettings`" rule
-  meaningful.
+## Plugin types
 
-Out of scope for now: dials and encoders (`dialRotate`, `dialDown`, `touchTap`,
-`setFeedback` are recorded but inert), multi-actions, and profile switching.
+- **Node** plugins start with `--inspect`. The harness reads exact memory and handle counts.
+  Use `--node <path>` to select the Node binary.
+- **Native** plugins start directly. The lifecycle check uses RSS and the commands that the
+  plugin sends after `willDisappear`.
 
-## Runtimes
+## Limits
 
-- **Node** plugins (a `Nodejs` block in the manifest) are launched with `--inspect`, giving
-  exact heap, external-memory, and active-handle readings. Use `--node <path>` to run under
-  Stream Deck's bundled Node instead of whatever is on `PATH`.
-- **Native** plugins (`CodePathMac` / `CodePathWin`, no `Nodejs` block) are spawned
-  directly. No debugger, so the lifecycle check falls back to RSS plus the
-  language-agnostic after-disappear check.
-
-## Fidelity limits
-
-Read these before trusting a green result.
-
-- **Chromium is not QtWebEngine.** Key screenshots and property-inspector screenshots are
-  rendered by Chromium, which supports far more than Stream Deck's Qt-based SVG renderer.
-  A key can look perfect in a screenshot and render blank on hardware — which is exactly
-  why `lint-svg` exists. Trust the lint over the picture.
-- **Title rendering is an approximation.** Font size is scaled against a 72px key; Stream
-  Deck's text shadow and glyph hinting are not reproduced.
-- **The property inspector panel width is a guess** (345px default, `--width` to change).
-- **RSS is noisy.** For native plugins the memory figure is indicative, not conclusive.
-- **The harness mocks the protocol, not the plugin's side effects.** The plugin runs for
-  real: pressing a key runs its actual handler, so it will hit live APIs, spawn processes,
-  and open URLs. Commands sent through the SDK (`openUrl`, `switchToProfile`) are recorded
-  and left inert, but a plugin that calls `open()` or `fetch()` itself is not intercepted.
-  Point plugins at test credentials, and expect real network traffic.
+- Chromium draws the screenshots. It supports more SVG than Stream Deck. Trust `lint-svg`
+  more than the screenshot.
+- The title text is an estimate.
+- The property inspector width is an estimate (345 px). Change it with `--width`.
+- RSS is not exact. For native plugins, memory results are only an indication.
+- The plugin runs for real. It can call APIs, start processes and open URLs. Use test
+  credentials.
 
 ## Fixtures
 
-[`fixtures/leaky`](fixtures/leaky) is a dependency-free plugin whose actions leak in known,
-distinct ways — an uncleared silent timer, a timer that keeps drawing to a dead key, a
-retained `Buffer`, a retained JS array — plus one that behaves correctly. It exists so the
-lifecycle check can be shown to detect what it claims to, rather than trusted:
+[`fixtures/leaky`](fixtures/leaky) is a plugin with actions that leak in known ways, and one
+action that does not leak.
 
 ```bash
 sdtest -s=fix start fixtures/leaky
@@ -113,28 +98,13 @@ sdtest -s=fix check-lifecycle com.sdtest.fixture.timer-leak --cycles 6 --interac
 sdtest -s=fix close
 ```
 
-Restart the session between checks: a leaking action keeps emitting, and its noise would
-otherwise be mixed into the next measurement (the report says so when it happens).
+Start a new session for each check. A leaking action adds noise to the next check.
 
-[`fixtures/native`](fixtures/native) exercises the native launch path — no `Nodejs` block,
-no inspector — standing in for a Rust or C++ plugin. macOS/Linux only.
+## Release
 
-## Layout
-
-```
-src/host/      the mock Stream Deck: protocol, devices, action instances, settings, transcript
-src/plugin/    manifest parsing, process launch, Node inspector client, log reading
-src/render/    key compositing, Chromium screenshots, the SVG Tiny 1.2 linter
-src/pi/        property inspector static server and page driver
-src/checks/    the appear/disappear lifecycle check
-src/scenario/  declarative scenario runner
-src/daemon/    session daemon and its RPC methods
-src/cli/       argument parsing, output formatting, commands
-```
-
-Protocol types in `src/host/protocol.ts` are ported from the Rust SDK at
-`~/Code/streamdeck-rs`, which models the SDK v3 surface more completely than the published
-reference.
+Each push to `main` stages a new version on npm and creates a GitHub release. The version is
+public on npm after a maintainer approves it. The major and minor numbers come from
+`package.json`. The run number of the workflow is the patch number.
 
 ## License
 

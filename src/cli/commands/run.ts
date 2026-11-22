@@ -10,11 +10,7 @@ import { DaemonClient } from "../client.js";
 import { emit, fail } from "../output.js";
 import { closeSession, launchSession } from "./sessions.js";
 
-/**
- * Runs a scenario file end to end in its own session and prints one report. This is the
- * shape an agent should reach for: a whole check in a single call, rather than a long
- * sequence of round trips.
- */
+/** Runs a scenario file in its own session and prints one report. */
 export async function runCommand(args: Args): Promise<void> {
 	const file = args.positional[0];
 	if (file === undefined) {
@@ -24,7 +20,7 @@ export async function runCommand(args: Args): Promise<void> {
 	const path = resolve(file);
 	const scenario = parseScenario(yamlToJson(readFileSync(path, "utf8")), path);
 
-	// Paths in a scenario are relative to the scenario file, not the shell's directory.
+	// Scenario paths are relative to the scenario file.
 	const base = dirname(path);
 	const pluginPath = resolvePath(scenario.plugin, base);
 

@@ -5,7 +5,7 @@ import type { Readable } from "node:stream";
 import type { RegistrationInfo } from "../host/protocol.js";
 import type { PluginProject } from "./manifest.js";
 
-/** Matches the line Node prints on stderr when started with `--inspect`. */
+/** Matches the line that Node prints for `--inspect`. The group is the inspector URL. */
 const INSPECTOR_LINE = /Debugger listening on (ws:\/\/\S+)/;
 
 export type LaunchOptions = {
@@ -13,9 +13,9 @@ export type LaunchOptions = {
 	port: number;
 	pluginUuid: string;
 	info: RegistrationInfo;
-	/** Node binary to use for Node plugins. Defaults to the one running the harness. */
+	/** Node binary for Node plugins. The default is the Node that runs the harness. */
 	nodePath?: string;
-	/** Set false to skip `--inspect` (disables heap and handle measurement). */
+	/** Set to false to start without `--inspect`. Memory and handle data are then not available. */
 	inspect?: boolean;
 	env?: NodeJS.ProcessEnv;
 };
@@ -26,10 +26,7 @@ export type OutputLine = {
 	text: string;
 };
 
-/**
- * The plugin process under test. Launched with exactly the arguments Stream Deck passes:
- * `-port`, `-pluginUUID`, `-registerEvent`, `-info`.
- */
+/** The plugin process. It gets the same arguments that Stream Deck passes. */
 export class PluginProcess extends EventEmitter {
 	public readonly args: string[];
 
@@ -67,8 +64,7 @@ export class PluginProcess extends EventEmitter {
 		}
 
 		this.#child = spawn(this.command, this.args, {
-			// Stream Deck runs plugins from inside the .sdPlugin folder; the SDK's log
-			// directory is resolved relative to it.
+			// Stream Deck starts plugins in the .sdPlugin folder.
 			cwd: project.root,
 			env: { ...process.env, ...options.env },
 			stdio: ["ignore", "pipe", "pipe"],
@@ -149,7 +145,7 @@ export class PluginProcess extends EventEmitter {
 		}
 	}
 
-	/** Resolves with the inspector WebSocket URL, or undefined if the plugin is native. */
+	/** Resolves with the inspector URL, or undefined for a native plugin. */
 	public async waitForInspector(timeoutMs: number): Promise<string | undefined> {
 		if (this.runtime !== "node") {
 			return undefined;

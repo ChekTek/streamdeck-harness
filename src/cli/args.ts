@@ -9,7 +9,7 @@ export type Args = {
 
 const DEFAULT_SESSION = "default";
 
-/** Switches that take no value, so they never consume the argument after them. `--no-<name>` sets one false. */
+/** Flags without a value. `--no-<name>` sets a flag to false. */
 const BOOLEAN_FLAGS = new Set([
 	"all",
 	"appear",
@@ -32,10 +32,7 @@ function isFlagBoolean(value: boolean | string | undefined): value is boolean {
 	return typeof value === "boolean";
 }
 
-/**
- * Minimal parser for `sdtest -s=<session> <verb> [positional] [--flag value] [--bool]`.
- * `-s=name`, `-s name`, and `--session name` are all accepted, matching playwright-cli.
- */
+/** Parses `sdtest -s=<session> <verb> [positional] [--flag value] [--bool]`. */
 export function parseArgs(argv: string[]): Args {
 	let session = process.env.SDTEST_SESSION ?? DEFAULT_SESSION;
 	const positional: string[] = [];
@@ -128,7 +125,7 @@ export function flagList(args: Args, name: string): string[] | undefined {
 		.filter((part) => part.length > 0);
 }
 
-/** Parses a JSON flag, accepting `@path` to read from a file. */
+/** Reads a JSON flag. `@path` reads the JSON from a file. */
 export function flagJson(args: Args, name: string): JsonObject | undefined {
 	const value = flagString(args, name);
 	if (value === undefined) {

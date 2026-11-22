@@ -10,7 +10,7 @@ export type LintStepReport = {
 	summary: string[];
 };
 
-/** Lints every `.svg` under `target` for the scenario runner's `lintSvg` step. */
+/** Lints each `.svg` file under `target`. */
 export function lintPath(target: string): LintStepReport {
 	const root = resolve(target);
 	const files: string[] = [];

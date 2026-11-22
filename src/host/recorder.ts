@@ -6,7 +6,7 @@ export type Direction = "from-pi" | "from-plugin" | "harness" | "to-pi" | "to-pl
 
 export type TranscriptEntry = {
 	seq: number;
-	/** Milliseconds since the session started. */
+	/** Milliseconds from the start of the session. */
 	at: number;
 	direction: Direction;
 	event: string;
@@ -34,17 +34,13 @@ export type EntryFilter = {
 	sinceMs?: number;
 };
 
-/**
- * Timestamped record of every frame in both directions, plus harness-detected protocol
- * violations. Nothing is dropped -- unknown events are recorded verbatim so a new Stream
- * Deck event shows up in the transcript instead of vanishing.
- */
+/** Records each frame in both directions, and the protocol violations that the harness finds. */
 export class Recorder extends EventEmitter {
 	readonly #startedAt = Date.now();
 	readonly #entries: TranscriptEntry[] = [];
 	readonly #violations: Violation[] = [];
 	#seq = 0;
-	/** Timestamp of the most recent frame in any direction, used for quiescence waits. */
+	/** Time of the last frame. */
 	#lastActivityAt = 0;
 
 	public get lastActivityAt(): number {
@@ -125,7 +121,7 @@ export class Recorder extends EventEmitter {
 		return this.#violations.filter((violation) => violation.seq >= sinceSeq);
 	}
 
-	/** Resolves with the first entry matching `predicate`, considering entries from `sinceSeq`. */
+	/** Resolves with the first entry from `sinceSeq` that matches `predicate`. */
 	public async waitFor(
 		predicate: (entry: TranscriptEntry) => boolean,
 		timeoutMs: number,
@@ -155,7 +151,7 @@ export class Recorder extends EventEmitter {
 		});
 	}
 
-	/** Resolves once no frame has been recorded for `quietMs`, or rejects at `timeoutMs`. */
+	/** Resolves when no frame arrives for `quietMs`. Rejects after `timeoutMs`. */
 	public async waitForQuiet(quietMs: number, timeoutMs: number): Promise<void> {
 		const deadline = Date.now() + timeoutMs;
 		for (;;) {

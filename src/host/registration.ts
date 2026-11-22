@@ -3,10 +3,7 @@ import { platform, release } from "node:os";
 import { Device } from "./device.js";
 import type { RegistrationInfo } from "./protocol.js";
 
-/**
- * Colors and font captured from a real Stream Deck 7.5 `-info` payload. The property
- * inspector renders against these, so they are reproduced verbatim rather than invented.
- */
+/** Colors from a real Stream Deck 7.5 `-info` payload. The property inspector uses them. */
 const APPLICATION_COLORS = {
 	buttonPressedBackgroundColor: "#303030FF",
 	buttonPressedBorderColor: "#646464FF",
@@ -16,7 +13,7 @@ const APPLICATION_COLORS = {
 	mouseDownColor: "#2EA8FFFF",
 } as const;
 
-/** Stream Deck version the harness reports itself as. */
+/** Stream Deck version that the harness reports. */
 export const EMULATED_STREAM_DECK_VERSION = "7.5.0.22877";
 
 function currentPlatform(): string {

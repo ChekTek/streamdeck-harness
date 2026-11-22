@@ -1,10 +1,4 @@
-/**
- * Fixture plugin for the sdtest lifecycle check.
- *
- * Speaks the Stream Deck WebSocket protocol directly using Node's global WebSocket, so the
- * fixture has no dependencies and no build step. Each action leaks in a different way, or
- * does not leak at all, so the check can be shown to detect what it claims to detect.
- */
+/** Fixture plugin for the lifecycle check. Each action leaks in a different way, or does not leak. */
 const args = process.argv.slice(2);
 const arg = (name) => {
 	const index = args.indexOf(name);
@@ -17,7 +11,7 @@ const registerEvent = arg("-registerEvent");
 
 const socket = new WebSocket(`ws://127.0.0.1:${port}`);
 
-/** Per-context state, keyed by the Stream Deck context id. */
+/** State for each context id. */
 const timers = new Map();
 const retained = new Map();
 
@@ -49,18 +43,17 @@ function onWillAppear(action, context) {
 			break;
 
 		case "com.sdtest.fixture.timer-leak":
-			// Never cleared, and never observable over the socket: only the active-handle
-			// count can reveal this one.
+			// Not cleared and not visible on the socket. Only the handle count shows it.
 			setInterval(() => {}, 50);
 			break;
 
 		case "com.sdtest.fixture.chatty-leak":
-			// Never cleared, and keeps drawing to a key that will be gone.
+			// Not cleared. It continues to draw to a key that is gone.
 			setInterval(() => send({ event: "setTitle", context, payload: { title: String(Date.now()) } }), 50);
 			break;
 
 		case "com.sdtest.fixture.heap-leak": {
-			// Buffers live outside the V8 heap, so this is only visible in `external`.
+			// Buffers are outside the V8 heap. Only `external` shows this.
 			const existing = retained.get("buffers") ?? [];
 			existing.push(Buffer.alloc(512 * 1024, 1));
 			retained.set("buffers", existing);
@@ -84,5 +77,5 @@ function onWillDisappear(action, context) {
 		clearInterval(timers.get(context));
 		timers.delete(context);
 	}
-	// Every other action deliberately releases nothing.
+	// The other actions release nothing.
 }

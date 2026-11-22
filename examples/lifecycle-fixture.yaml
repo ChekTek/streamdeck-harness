@@ -1,5 +1,4 @@
-# Proves the lifecycle check detects what it claims to, using the bundled fixture plugin.
-# Each action leaks in a different way, and one does not leak at all.
+# Checks that the lifecycle check finds each leak in the fixture plugin.
 #
 #   sdtest run examples/lifecycle-fixture.yaml
 name: Lifecycle check self-test
