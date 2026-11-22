@@ -23,12 +23,12 @@ async function main(): Promise<void> {
 		process.exit(2);
 	}
 
-	const startPath = `${sessionDir(name)}/start.json`;
-	const startText = readFileSync(startPath, "utf8");
-	rmSync(startPath, { force: true });
-	const options = parseStartFile(parseJsonValue(startText), name);
-
 	try {
+		const startPath = `${sessionDir(name)}/start.json`;
+		const startText = readFileSync(startPath, "utf8");
+		rmSync(startPath, { force: true });
+		const options = parseStartFile(parseJsonValue(startText), name);
+
 		const session = await Session.start(options);
 		const daemon = new Daemon({ session, idleTimeoutMs: options.idleTimeoutMs ?? 15 * 60_000 });
 		await daemon.listen();
@@ -77,7 +77,11 @@ function parseStartFile(value: JsonValue, name: string): SessionOptions & { idle
 		options.globalSettings = value.globalSettings;
 	}
 	if (isJsonString(value.envFile)) {
-		options.env = parseEnv(readFileSync(value.envFile, "utf8"));
+		try {
+			options.env = parseEnv(readFileSync(value.envFile, "utf8"));
+		} catch (cause) {
+			throw new Error(`could not read the env file ${value.envFile}: ${errorMessage(cause)}`, { cause });
+		}
 	}
 	if (isJsonObject(value.env)) {
 		options.env = { ...options.env, ...parsePluginEnv(value.env, "start.json env") };
