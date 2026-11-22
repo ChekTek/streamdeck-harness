@@ -349,7 +349,7 @@ export const methods = {
 		);
 		const hint = connected
 			? undefined
-			: "The page never called connectElgatoStreamDeckSocket. Check that the property inspector loads its SDPI bundle, and read consoleErrors.";
+			: "Check that the property inspector loads its SDPI bundle, and read consoleErrors.";
 
 		return compactJson({
 			url: inspector.url,

@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<title>Readiness fixture</title>
+	<style>
+		body { display: none; color: white; background: #252525; font-family: sans-serif; }
+		fixture-field { display: block; margin: 12px 0; }
+	</style>
+</head>
+<body>
+	<h1>Readiness fixture</h1>
+	<fixture-field setting="label"></fixture-field>
+	<fixture-field setting="globalLabel" global></fixture-field>
+	<script>
+		window.connectElgatoStreamDeckSocket = (port, context, registerEvent) => {
+			const socket = new WebSocket(`ws://127.0.0.1:${port}`);
+			const send = (event, payload) => socket.send(JSON.stringify({ event, context, payload }));
+			let settings;
+			let globalSettings;
+
+			socket.addEventListener("open", () => {
+				socket.send(JSON.stringify({ event: registerEvent, uuid: context }));
+				send("getSettings");
+			});
+
+			socket.addEventListener("message", (message) => {
+				const { event, payload } = JSON.parse(message.data);
+				if (event === "didReceiveSettings") {
+					settings = payload.settings;
+					send("getGlobalSettings");
+				} else if (event === "didReceiveGlobalSettings") {
+					globalSettings = payload.settings;
+					customElements.define("fixture-field", class extends HTMLElement {
+						constructor() {
+							super();
+							const name = this.getAttribute("setting");
+							const global = this.hasAttribute("global");
+							const stored = global ? globalSettings : settings;
+							this.focusElement = document.createElement("input");
+							this.focusElement.setAttribute("aria-label", name);
+							this.attachShadow({ mode: "open" }).append(this.focusElement);
+							this.updateComplete = new Promise((resolve) => {
+								requestAnimationFrame(() => {
+									this.focusElement.value = stored[name] ?? "";
+									resolve(true);
+								});
+							});
+							this.focusElement.addEventListener("change", () => {
+								stored[name] = this.value;
+								send(global ? "setGlobalSettings" : "setSettings", stored);
+							});
+						}
+
+						get value() {
+							return this.focusElement.value;
+						}
+					});
+					document.body.style.display = "block";
+				}
+			});
+		};
+	</script>
+</body>
+</html>

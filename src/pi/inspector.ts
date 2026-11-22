@@ -53,14 +53,6 @@ declare global {
 /** Time between two readiness checks, in milliseconds. */
 const READY_POLL_MS = 10;
 
-type PageState = {
-	connected: boolean;
-	traffic: UiTraffic;
-	undefinedTags: string[];
-	updated: boolean;
-	visible: boolean;
-};
-
 /** A headless property inspector. Only one is open at a time. */
 export class Inspector {
 	public readonly consoleLines: ConsoleLine[] = [];
@@ -383,8 +375,16 @@ export class Inspector {
 		const deadline = Date.now() + timeoutMs;
 		let confirmed = false;
 		for (;;) {
-			const state = await this.#state(Math.max(deadline - Date.now(), 0));
-			const blocker = blockerOf(state, hostTraffic());
+			let blocker: string | undefined;
+			try {
+				const readiness = await this.#readReadiness(Math.max(deadline - Date.now(), 0));
+				blocker = blockerOf(readiness, hostTraffic());
+			} catch (cause) {
+				if (!errorMessage(cause).includes("Execution context was destroyed")) {
+					throw cause;
+				}
+				blocker = "the page navigated";
+			}
 			if (blocker === undefined && confirmed) {
 				return undefined;
 			}
@@ -414,28 +414,29 @@ export class Inspector {
 	}
 
 	/** Reads the readiness state of the page. Waits at most `budgetMs` for the component updates. */
-	async #state(budgetMs: number): Promise<PageState> {
+	async #readReadiness(budgetMs: number): Promise<PageReadiness> {
 		return this.#page.evaluate(async (budget) => {
 			type SdpiHost = Element & { updateComplete?: Promise<boolean> };
 			const bound = [...document.querySelectorAll("[setting]")];
-			const updated = await Promise.race([
-				// SAFETY: SDPI elements have updateComplete. lib.dom does not declare it.
-				Promise.allSettled(bound.map((element) => (element as SdpiHost).updateComplete)).then(() => true),
-				new Promise<boolean>((done) => setTimeout(done, budget, false)),
-			]);
+			const updatesComplete =
+				(await Promise.race([
+					// SAFETY: SDPI elements have updateComplete. lib.dom does not declare it.
+					Promise.allSettled(bound.map((element) => (element as SdpiHost).updateComplete)),
+					new Promise<false>((done) => setTimeout(done, budget, false)),
+				])) !== false;
 			return {
 				connected: window.__sdtestConnected === true,
 				traffic: window.__sdtestTraffic ?? { received: 0, sent: 0 },
 				undefinedTags: bound.filter((element) => !element.matches(":defined")).map((element) => element.localName),
-				updated,
-				visible: document.body.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true }),
+				updatesComplete,
+				visible: document.body?.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true }) ?? false,
 			};
 		}, budgetMs);
 	}
 }
 
 /** Tells what the page still waits for. Returns undefined when it is ready. */
-function blockerOf(state: PageState, hostTraffic: UiTraffic | undefined): string | undefined {
+function blockerOf(state: PageReadiness, hostTraffic: UiTraffic | undefined): string | undefined {
 	if (!state.connected) {
 		return "the page did not call connectElgatoStreamDeckSocket";
 	}
@@ -448,7 +449,7 @@ function blockerOf(state: PageState, hostTraffic: UiTraffic | undefined): string
 	if (state.undefinedTags.length > 0) {
 		return `custom elements are not defined: ${[...new Set(state.undefinedTags)].join(", ")}`;
 	}
-	if (!state.updated) {
+	if (!state.updatesComplete) {
 		return "a component with a setting attribute did not complete its update";
 	}
 	if (!state.visible) {
@@ -497,7 +498,8 @@ function bootstrapScript(hostPort: number, uuid: string, info: RegistrationInfo,
   let hostSocket;
   WebSocket.prototype.send = function (data) {
     send.call(this, data);
-    if (new URL(this.url).port !== args[0]) return;
+    const url = new URL(this.url);
+    if (url.port !== args[0] || !["localhost", "127.0.0.1", "[::1]"].includes(url.hostname)) return;
     if (hostSocket !== this) {
       hostSocket = this;
       traffic.received = 0;
@@ -521,6 +523,14 @@ function bootstrapScript(hostPort: number, uuid: string, info: RegistrationInfo,
   });
 })();`;
 }
+
+type PageReadiness = {
+	connected: boolean;
+	traffic: UiTraffic;
+	undefinedTags: string[];
+	updatesComplete: boolean;
+	visible: boolean;
+};
 
 type PiFieldArg = {
 	setting: string;

@@ -56,8 +56,7 @@ export class MockStreamDeck extends EventEmitter {
 	readonly #manifest: Manifest;
 	readonly #info: RegistrationInfo;
 	readonly #actions = new Map<string, ActionInstance>();
-	readonly #uiSockets = new Map<string, WebSocket>();
-	readonly #uiTraffic = new Map<string, UiTraffic>();
+	readonly #uiConnections = new Map<string, { socket: WebSocket; traffic: UiTraffic }>();
 	/** Payloads that the lint already checked. */
 	readonly #lintedImages = new Set<string>();
 
@@ -162,10 +161,10 @@ export class MockStreamDeck extends EventEmitter {
 	}
 
 	public async close(): Promise<void> {
-		for (const socket of this.#uiSockets.values()) {
+		for (const { socket } of this.#uiConnections.values()) {
 			socket.close();
 		}
-		this.#uiSockets.clear();
+		this.#uiConnections.clear();
 		this.#pluginSocket?.close();
 		this.#pluginSocket = undefined;
 
@@ -201,7 +200,7 @@ export class MockStreamDeck extends EventEmitter {
 	}
 
 	public hasUi(context: string): boolean {
-		return this.#uiSockets.has(context);
+		return this.#uiConnections.has(context);
 	}
 
 	public keyDown(instance: ActionInstance, userDesiredState?: number): void {
@@ -273,10 +272,10 @@ export class MockStreamDeck extends EventEmitter {
 
 	public removeAction(instance: ActionInstance): void {
 		this.disappear(instance);
-		const socket = this.#uiSockets.get(instance.context);
-		if (socket !== undefined) {
-			socket.close();
-			this.#uiSockets.delete(instance.context);
+		const connection = this.#uiConnections.get(instance.context);
+		if (connection !== undefined) {
+			connection.socket.close();
+			this.#uiConnections.delete(instance.context);
 		}
 		this.#actions.delete(instance.context);
 		this.settings.forget(instance.context);
@@ -289,7 +288,7 @@ export class MockStreamDeck extends EventEmitter {
 
 	/** Counts the frames exchanged with the property inspector of `context` since it registered. */
 	public uiTraffic(context: string): UiTraffic | undefined {
-		return this.#uiTraffic.get(context);
+		return this.#uiConnections.get(context)?.traffic;
 	}
 
 	/** Resolves when the plugin completes the `registerPlugin` handshake. */
@@ -370,8 +369,7 @@ export class MockStreamDeck extends EventEmitter {
 		}
 
 		const traffic: UiTraffic = { received: 1, sent: 0 };
-		this.#uiSockets.set(context, socket);
-		this.#uiTraffic.set(context, traffic);
+		this.#uiConnections.set(context, { socket, traffic });
 		this.recorder.record("from-pi", frame);
 
 		socket.on("message", (raw) => {
@@ -379,11 +377,8 @@ export class MockStreamDeck extends EventEmitter {
 			this.#onUiMessage(context, String(raw));
 		});
 		socket.on("close", () => {
-			if (this.#uiSockets.get(context) === socket) {
-				this.#uiSockets.delete(context);
-			}
-			if (this.#uiTraffic.get(context) === traffic) {
-				this.#uiTraffic.delete(context);
+			if (this.#uiConnections.get(context)?.socket === socket) {
+				this.#uiConnections.delete(context);
 			}
 		});
 
@@ -407,12 +402,11 @@ export class MockStreamDeck extends EventEmitter {
 	}
 
 	#sendToUi(context: string, frame: Frame): void {
-		const socket = this.#uiSockets.get(context);
-		const traffic = this.#uiTraffic.get(context);
+		const connection = this.#uiConnections.get(context);
 		this.recorder.record("to-pi", frame);
-		if (socket !== undefined && traffic !== undefined) {
-			traffic.sent++;
-			socket.send(JSON.stringify(frame));
+		if (connection !== undefined) {
+			connection.traffic.sent++;
+			connection.socket.send(JSON.stringify(frame));
 		}
 	}
 
@@ -467,7 +461,7 @@ export class MockStreamDeck extends EventEmitter {
 				if (context !== undefined) {
 					this.settings.set(context, payload);
 					// Stream Deck tells only the other side.
-					if (this.#uiSockets.has(context) && instance !== undefined) {
+					if (this.#uiConnections.has(context) && instance !== undefined) {
 						this.#sendToUi(context, this.#settingsFrame("didReceiveSettings", instance));
 					}
 				}
@@ -477,7 +471,7 @@ export class MockStreamDeck extends EventEmitter {
 				break;
 			case "setGlobalSettings":
 				this.settings.setGlobal(payload);
-				for (const uiContext of this.#uiSockets.keys()) {
+				for (const uiContext of this.#uiConnections.keys()) {
 					this.#sendToUi(uiContext, globalSettingsFrame(this.settings.getGlobal()));
 				}
 				break;
@@ -500,7 +494,7 @@ export class MockStreamDeck extends EventEmitter {
 			case "setResources":
 				if (context !== undefined) {
 					this.settings.setResources(context, payload);
-					if (this.#uiSockets.has(context) && instance !== undefined) {
+					if (this.#uiConnections.has(context) && instance !== undefined) {
 						this.#sendToUi(context, this.#settingsFrame("didReceiveResources", instance));
 					}
 				}

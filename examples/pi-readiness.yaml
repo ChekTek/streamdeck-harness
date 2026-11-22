@@ -1,0 +1,39 @@
+name: Property inspector readiness
+plugin: ../fixtures/leaky
+globalSettings:
+  globalLabel: Global value
+
+steps:
+  - add: com.sdtest.fixture.clean
+    as: clean
+    settings:
+      label: Local value
+
+  - name: Wait for host replies, custom elements, updates, and a visible body
+    piOpen: clean
+    timeout: 1000
+
+  - name: Type immediately after opening without a settle delay
+    piType: label
+    text: " ready"
+    clear: false
+    blur: true
+    settle: 0
+    expect:
+      settingsOf: clean
+      settingsContain:
+        label: Local value ready
+
+  - name: Global field starts with its stored value
+    piType: globalLabel
+    text: " ready"
+    clear: false
+    blur: true
+    settle: 0
+    expect:
+      globalSettingsContain:
+        globalLabel: Global value ready
+
+  - piScreenshot: ready
+  - piClose: true
+  - remove: clean

@@ -62,14 +62,22 @@ sdtest -s=demo pi-type hours 12x7 --paste
 `pi-open` returns when the page is ready. The page is ready when:
 
 - It called `connectElgatoStreamDeckSocket` and registered with the mock host.
-- No frames are in flight between the page and the host. The page has the answers to its
-  requests, for example `getSettings` and `getGlobalSettings`.
+- No frames are in flight between the page and the host. This covers requests that the host
+  answers, such as `getSettings` and `getGlobalSettings`.
 - Each component with a `setting` attribute completed its update.
 - The body is visible.
 
 The output shows `ready` and the time that the command waited. After the time limit, the
 command returns with `ready: false` and the reason. Change the limit with `--timeout`
 (default: 5000 ms). With `--no-wait`, the command waits only for the connection.
+
+`ready: true` does not guarantee answers from the plugin to `sendToPlugin`, such as SDPI
+`datasource` requests. Use `wait-quiet --quiet <ms>` to allow plugin traffic to settle, then
+check the expected fields or events. A quiet period is not proof that the plugin answered:
+choose an interval that covers its expected response time.
+
+A scenario `piOpen` step fails if the page is not ready. Set `timeout` in milliseconds to
+change its limit, or `wait: false` to check only the connection.
 
 - `pi-set` assigns the value of a field and dispatches `input` and `change`. It sends no key
   events.
@@ -128,7 +136,9 @@ unknown events.
 ## Fixtures
 
 [`fixtures/leaky`](fixtures/leaky) is a plugin with actions that leak in known ways, and one
-action that does not leak.
+action that does not leak. Its property inspector loads local and global settings before
+showing its fields. Run `sdtest run examples/pi-readiness.yaml` to check readiness and
+immediate field input.
 
 ```bash
 sdtest -s=fix start fixtures/leaky
