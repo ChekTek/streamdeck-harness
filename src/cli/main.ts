@@ -331,20 +331,23 @@ const REMOTE = {
 	},
 	"pi-open": {
 		method: "piOpen",
-		summary: "Render an action's property inspector headlessly and connect it to the mock host.",
-		usage: "pi-open <ref> [--width PX] [--height PX] [--timeout MS]",
+		summary:
+			"Render an action's property inspector headlessly, connect it to the mock host and wait until it is ready.",
+		usage: "pi-open <ref> [--width PX] [--height PX] [--timeout MS] [--no-wait]",
 		params: (args: Args): JsonObject =>
 			compactJson({
 				ref: ref(args),
 				width: flagNumber(args, "width"),
 				height: flagNumber(args, "height"),
 				timeoutMs: flagNumber(args, "timeout"),
+				wait: flagBool(args, "wait"),
 			}),
 		human: (result: JsonValue): string => {
 			const row = jsonObject(result);
 			const lines = [
 				`url        ${text(row.url)}`,
 				`connected  ${text(row.connected)}   registered with host: ${text(row.registered)}`,
+				`ready      ${text(row.ready)}${row.reason === undefined ? "" : ` (${text(row.reason)})`}   waited ${text(row.waitedMs)} ms`,
 				"",
 				"fields:",
 				fieldsTable(jsonArray(row.fields), ["SETTING", "TAG", "LABEL", "VALUE", "SCOPE", "VISIBLE"]),

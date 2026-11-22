@@ -165,9 +165,15 @@ async function runStep(
 	}
 
 	if (step.piOpen !== undefined) {
-		const opened = await callObject(client, "piOpen", compactJson({ ref: resolveAlias(aliases, step.piOpen) }));
-		if (opened.connected !== true) {
-			throw new Error(`property inspector never connected. ${isJsonString(opened.hint) ? opened.hint : ""}`.trim());
+		const opened = await callObject(
+			client,
+			"piOpen",
+			compactJson({ ref: resolveAlias(aliases, step.piOpen), timeoutMs: step.timeout, wait: step.wait }),
+		);
+		if (opened.connected !== true || (step.wait !== false && opened.ready !== true)) {
+			const reason = isJsonString(opened.reason) ? opened.reason : "the page did not become ready";
+			const hint = isJsonString(opened.hint) ? ` ${opened.hint}` : "";
+			throw new Error(`property inspector is not ready: ${reason}.${hint}`);
 		}
 		return opened;
 	}

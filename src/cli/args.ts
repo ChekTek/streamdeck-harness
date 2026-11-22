@@ -25,6 +25,7 @@ const BOOLEAN_FLAGS = new Set([
 	"raw",
 	"since-start",
 	"strict",
+	"wait",
 ]);
 
 function isFlagString(value: boolean | string | undefined): value is string {

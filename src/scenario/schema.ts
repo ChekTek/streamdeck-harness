@@ -65,6 +65,8 @@ export type Step = {
 	setSecrets?: JsonObject;
 
 	piOpen?: string;
+	timeout?: number;
+	wait?: boolean;
 	piSet?: string;
 	value?: JsonValue;
 	piType?: string;
@@ -178,6 +180,8 @@ const STEP_KEYS = [
 	"setGlobalSettings",
 	"setSecrets",
 	"piOpen",
+	"timeout",
+	"wait",
 	"piSet",
 	"value",
 	"piType",
@@ -228,6 +232,8 @@ function parseStep(value: JsonValue, source: string): Step {
 	assignObject(step, value, "setGlobalSettings", source);
 	assignObject(step, value, "setSecrets", source);
 	assignString(step, value, "piOpen", source);
+	assignNumber(step, value, "timeout", source);
+	assignBoolean(step, value, "wait", source);
 	assignString(step, value, "piSet", source);
 	if ("value" in value) {
 		step.value = value.value;

@@ -18,6 +18,7 @@
         {
             "Name": "Clean",
             "UUID": "com.sdtest.fixture.clean",
+            "PropertyInspectorPath": "ui/index.html",
             "Icon": "imgs/icon",
             "Tooltip": "Starts a timer in willAppear and clears it in willDisappear.",
             "Controllers": ["Keypad"],
