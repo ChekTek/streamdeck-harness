@@ -67,6 +67,11 @@ export type Step = {
 	piOpen?: string;
 	piSet?: string;
 	value?: JsonValue;
+	piType?: string;
+	text?: string;
+	clear?: boolean;
+	paste?: boolean;
+	blur?: boolean;
 	piClick?: string;
 	piScreenshot?: string;
 	piClose?: boolean;
@@ -175,6 +180,11 @@ const STEP_KEYS = [
 	"piOpen",
 	"piSet",
 	"value",
+	"piType",
+	"text",
+	"clear",
+	"paste",
+	"blur",
 	"piClick",
 	"piScreenshot",
 	"piClose",
@@ -222,6 +232,11 @@ function parseStep(value: JsonValue, source: string): Step {
 	if ("value" in value) {
 		step.value = value.value;
 	}
+	assignString(step, value, "piType", source);
+	assignString(step, value, "text", source);
+	assignBoolean(step, value, "clear", source);
+	assignBoolean(step, value, "paste", source);
+	assignBoolean(step, value, "blur", source);
 	assignString(step, value, "piClick", source);
 	assignString(step, value, "piScreenshot", source);
 	assignBoolean(step, value, "piClose", source);
