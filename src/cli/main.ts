@@ -96,6 +96,15 @@ function stringifyResult(result: JsonValue): string {
 	return JSON.stringify(result, null, 2);
 }
 
+function fieldSummary(result: JsonValue): string {
+	const row = jsonObject(result);
+	return [
+		`${text(row.setting)} = ${JSON.stringify(row.value)}`,
+		`settings: ${JSON.stringify(row.settings)}`,
+		`global:   ${JSON.stringify(row.globalSettings)}`,
+	].join("\n");
+}
+
 function fieldsTable(fields: JsonValue[], columns: string[]): string {
 	return table([
 		columns,
@@ -366,7 +375,7 @@ const REMOTE = {
 	},
 	"pi-set": {
 		method: "piSet",
-		summary: "Set a property inspector field by its `setting` attribute, as a user would.",
+		summary: "Assign a property inspector field and dispatch input and change. No key events: see pi-type.",
 		usage: "pi-set <setting> <value> [--raw] [--settle MS]",
 		params: (args: Args): JsonObject =>
 			compactJson({
@@ -374,14 +383,22 @@ const REMOTE = {
 				value: coerce(args.positional[1], flagBool(args, "raw") === true),
 				settleMs: flagNumber(args, "settle"),
 			}),
-		human: (result: JsonValue): string => {
-			const row = jsonObject(result);
-			return [
-				`${text(row.setting)} = ${JSON.stringify(row.value)}`,
-				`settings: ${JSON.stringify(row.settings)}`,
-				`global:   ${JSON.stringify(row.globalSettings)}`,
-			].join("\n");
-		},
+		human: fieldSummary,
+	},
+	"pi-type": {
+		method: "piType",
+		summary: "Type into a property inspector text field with real key events, to test input filters.",
+		usage: "pi-type <setting> <text> [--no-clear] [--paste] [--blur] [--settle MS]",
+		params: (args: Args): JsonObject =>
+			compactJson({
+				setting: args.positional[0],
+				text: args.positional[1],
+				clear: flagBool(args, "clear"),
+				paste: flagBool(args, "paste"),
+				blur: flagBool(args, "blur"),
+				settleMs: flagNumber(args, "settle"),
+			}),
+		human: fieldSummary,
 	},
 	"pi-click": {
 		method: "piClick",

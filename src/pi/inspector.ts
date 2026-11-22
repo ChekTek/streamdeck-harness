@@ -18,6 +18,9 @@ import { StaticServer } from "./static-server.js";
 export const DEFAULT_PI_WIDTH = 345;
 export const DEFAULT_PI_HEIGHT = 600;
 
+/** The characters that need the Shift key on a US keyboard. */
+const US_SHIFT_CHARACTERS = '~!@#$%^&*()_+{}|:"<>?ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+
 export type OpenOptions = {
 	project: PluginProject;
 	instance: ActionInstance;
@@ -29,6 +32,15 @@ export type OpenOptions = {
 };
 
 export type ConsoleLine = { type: string; text: string };
+
+export type TypeOptions = {
+	/** Deletes the current value with Backspace first. Default: true. When false, the text goes at the end. */
+	clear?: boolean;
+	/** Inserts the text with one clipboard paste and not key by key. */
+	paste?: boolean;
+	/** Moves the focus out of the field after the text, so `change` fires. */
+	blur?: boolean;
+};
 
 /** A headless property inspector. Only one is open at a time. */
 export class Inspector {
@@ -164,8 +176,8 @@ export class Inspector {
 	}
 
 	/**
-	 * Sets an SDPI component by its `setting` attribute. It changes the inner control, so the
-	 * change handlers of the page run.
+	 * Sets an SDPI component by its `setting` attribute. It assigns the value of the inner
+	 * control and dispatches `input` and `change`. No key events fire.
 	 */
 	public async setField(setting: string, value: JsonValue): Promise<JsonObject> {
 		const result = await this.#page.evaluate(
@@ -232,6 +244,104 @@ export class Inspector {
 		return this.#page.locator("body").ariaSnapshot();
 	}
 
+	/**
+	 * Types into the text field of an SDPI component with real keyboard input on a US keyboard
+	 * layout. Each character sends `keydown`, `keypress`, `beforeinput`, `input` and `keyup`. Shift
+	 * is held for a character that needs it. A character that has no key on a US keyboard sends
+	 * only `beforeinput` and `input`.
+	 */
+	public async typeField(setting: string, text: string, options: TypeOptions = {}): Promise<JsonObject> {
+		const focused = await this.#page.evaluate(
+			async ({ setting: name, clear }: PiTypeArg) => {
+				type SdpiHost = HTMLElement & {
+					focusElement?: HTMLElement | { value?: HTMLElement };
+					updateComplete?: Promise<boolean>;
+				};
+
+				const node = document.querySelector(`[setting="${name}"]`);
+				if (node === null) {
+					const known = [...document.querySelectorAll("[setting]")].map((candidate) => candidate.getAttribute("setting"));
+					return {
+						ok: false as const,
+						error: `no component with setting="${name}". Present: ${known.join(", ") || "(none)"}`,
+					};
+				}
+
+				// SAFETY: SDPI elements have focusElement and updateComplete.
+				const element = node as SdpiHost;
+				await element.updateComplete?.catch(() => undefined);
+
+				const ref = element.focusElement;
+				const inner = ref instanceof HTMLElement ? ref : (ref?.value ?? undefined);
+				const isTextField =
+					inner instanceof HTMLTextAreaElement ||
+					(inner instanceof HTMLInputElement && ["text", "search", "url", "tel", "password"].includes(inner.type));
+				if (!isTextField) {
+					return { ok: false as const, error: `"${name}" is not a text field. Use pi-set for it.` };
+				}
+
+				if (!element.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true })) {
+					return { ok: false as const, error: `"${name}" is hidden.` };
+				}
+
+				inner.focus();
+				if (!inner.matches(":focus")) {
+					return { ok: false as const, error: `"${name}" cannot take focus. It is hidden or disabled.` };
+				}
+				inner.setSelectionRange(clear ? 0 : inner.value.length, inner.value.length);
+				return { ok: true as const, hasValue: inner.value !== "" };
+			},
+			{ setting, clear: options.clear ?? true },
+		);
+		if (!focused.ok) {
+			throw new Error(focused.error);
+		}
+
+		const keyboard = this.#page.keyboard;
+		if ((options.clear ?? true) && focused.hasValue) {
+			await keyboard.press("Backspace");
+		}
+		if (options.paste === true) {
+			await this.#paste(text);
+		} else {
+			for (const character of text) {
+				if (US_SHIFT_CHARACTERS.includes(character)) {
+					await keyboard.down("Shift");
+					await keyboard.press(character);
+					await keyboard.up("Shift");
+				} else {
+					await keyboard.type(character);
+				}
+			}
+		}
+
+		const value = await this.#page.evaluate(
+			async ({ setting: name, blur }: PiBlurArg) => {
+				type SdpiHost = HTMLElement & {
+					updateComplete?: Promise<boolean>;
+					value?: boolean | number | string | null;
+				};
+
+				if (blur) {
+					let active = document.activeElement;
+					while (active?.shadowRoot?.activeElement) {
+						active = active.shadowRoot.activeElement;
+					}
+					if (active instanceof HTMLElement) {
+						active.blur();
+					}
+				}
+
+				// SAFETY: SDPI elements have value and updateComplete.
+				const element = document.querySelector(`[setting="${name}"]`) as SdpiHost | null;
+				await element?.updateComplete?.catch(() => undefined);
+				return element?.value ?? null;
+			},
+			{ setting, blur: options.blur ?? false },
+		);
+		return compactJson({ setting, value });
+	}
+
 	/** Waits until the page connects to the host. Returns false after `timeoutMs`. */
 	public async waitForConnect(timeoutMs: number): Promise<boolean> {
 		try {
@@ -242,6 +352,21 @@ export class Inspector {
 		} catch {
 			return false;
 		}
+	}
+
+	/**
+	 * Pastes `text` into the focused field through the clipboard of the headless browser. The
+	 * field gets `paste`, then `beforeinput` and `input` with the input type `insertFromPaste`.
+	 */
+	async #paste(text: string): Promise<void> {
+		const context = this.#page.context();
+		await context.grantPermissions(["clipboard-write"], { origin: this.#server.origin });
+		try {
+			await this.#page.evaluate(async (data) => navigator.clipboard.writeText(data), text);
+		} finally {
+			await context.clearPermissions();
+		}
+		await this.#page.keyboard.press("ControlOrMeta+v");
 	}
 }
 
@@ -297,6 +422,16 @@ function bootstrapScript(hostPort: number, uuid: string, info: RegistrationInfo,
 type PiFieldArg = {
 	setting: string;
 	value: boolean | number | string | null;
+};
+
+type PiTypeArg = {
+	setting: string;
+	clear: boolean;
+};
+
+type PiBlurArg = {
+	setting: string;
+	blur: boolean;
 };
 
 function toPiFieldValue(value: JsonValue): boolean | number | string | null {

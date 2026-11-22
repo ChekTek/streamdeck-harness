@@ -181,6 +181,19 @@ async function runStep(
 			}),
 		);
 	}
+	if (step.piType !== undefined) {
+		return client.call(
+			"piType",
+			compactJson({
+				setting: step.piType,
+				text: step.text,
+				clear: step.clear,
+				paste: step.paste,
+				blur: step.blur,
+				settleMs: step.settle,
+			}),
+		);
+	}
 	if (step.piClick !== undefined) {
 		return client.call(
 			"piClick",
