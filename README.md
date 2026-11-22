@@ -104,6 +104,9 @@ change its limit, or `wait: false` to check only the connection.
 
 - `pi-visible <selector-or-text>` tells if an element is shown. An element in a hidden parent,
   such as a tab that is not selected, is not shown.
+- `pi-click` and `pi-visible` take a CSS selector or text. The prefix `css=` makes the target a
+  CSS selector (`css=form > input`) and `text=` makes it text. Without a prefix, a target that
+  starts with `#` or `.`, or that contains `[`, is a CSS selector. Each other target is text.
 - `pi-set` assigns the value of a field and dispatches `input` and `change`. It sends no key
   events.
 - `pi-type` types into a text field with real keyboard input. Use it to test input filters
@@ -119,7 +122,8 @@ change its limit, or `wait: false` to check only the connection.
 - The focus stays in the field. `--blur` moves the focus out, and then `change` fires.
 
 In a scenario, the step is `piType` with `text`, and optionally `clear`, `paste` and `blur`.
-The steps `piVisible` and `piHidden` fail when an element is not in that state.
+The steps `piVisible` and `piHidden` fail when an element is not in that state. They take the
+same targets as `pi-visible`.
 
 ## Scenarios
 

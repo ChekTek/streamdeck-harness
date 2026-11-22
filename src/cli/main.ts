@@ -405,7 +405,8 @@ const REMOTE = {
 	},
 	"pi-click": {
 		method: "piClick",
-		summary: "Click something in the property inspector (CSS selector, or visible text).",
+		summary:
+			"Click something in the property inspector (CSS selector, or visible text). The prefix css= or text= sets which one.",
 		usage: "pi-click <selector-or-text> [--settle MS]",
 		params: (args: Args): JsonObject => compactJson({ target: args.positional[0], settleMs: flagNumber(args, "settle") }),
 		human: (result: JsonValue): string => {
@@ -415,7 +416,8 @@ const REMOTE = {
 	},
 	"pi-visible": {
 		method: "piVisible",
-		summary: "Tell if an element of the property inspector is shown (CSS selector, or visible text).",
+		summary:
+			"Tell if an element of the property inspector is shown (CSS selector, or visible text). The prefix css= or text= sets which one.",
 		usage: "pi-visible <selector-or-text>",
 		params: (args: Args): JsonObject => compactJson({ target: args.positional[0] }),
 		human: (result: JsonValue): string => {
