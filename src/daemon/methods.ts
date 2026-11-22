@@ -387,6 +387,22 @@ export const methods = {
 		});
 	},
 
+	async piType({ session }: MethodContext, params: JsonObject): Promise<JsonValue> {
+		const inspector = requireInspector(session);
+		const applied = await inspector.typeField(requireStr(params, "setting"), requireStr(params, "text"), {
+			clear: bool(params, "clear"),
+			paste: bool(params, "paste"),
+			blur: bool(params, "blur"),
+		});
+		await new Promise((done) => setTimeout(done, num(params, "settleMs") ?? 300));
+		return compactJson({
+			setting: applied.setting,
+			value: applied.value,
+			settings: session.host.settings.get(inspector.context),
+			globalSettings: session.host.settings.getGlobal(),
+		});
+	},
+
 	async piClick({ session }: MethodContext, params: JsonObject): Promise<JsonValue> {
 		const inspector = requireInspector(session);
 		await inspector.click(requireStr(params, "target"));

@@ -23,13 +23,13 @@ sdtest install-browser
 
 ## Commands
 
-| Task                                           | Command                          |
-| ---------------------------------------------- | -------------------------------- |
-| See what a key shows                           | `screenshot`                     |
-| Check SVG files for Stream Deck                | `lint-svg`                       |
-| Find resources that an action does not release | `check-lifecycle`                |
-| Test the property inspector                    | `pi-open`, `pi-set`, `pi-fields` |
-| Read the messages and logs                     | `events`, `violations`, `logs`   |
+| Task                                           | Command                                     |
+| ---------------------------------------------- | ------------------------------------------- |
+| See what a key shows                           | `screenshot`                                |
+| Check SVG files for Stream Deck                | `lint-svg`                                  |
+| Find resources that an action does not release | `check-lifecycle`                           |
+| Test the property inspector                    | `pi-open`, `pi-set`, `pi-type`, `pi-fields` |
+| Read the messages and logs                     | `events`, `violations`, `logs`              |
 
 Run `sdtest help` for the full list. Add `--json` to a command for JSON output.
 
@@ -54,7 +54,9 @@ sdtest -s=demo close
 ```bash
 sdtest -s=demo pi-open com.example.plugin.action
 sdtest -s=demo pi-fields
-sdtest -s=demo pi-set mode get
+sdtest -s=demo pi-set mode toggle
+sdtest -s=demo pi-type hours 12x7
+sdtest -s=demo pi-type hours 12x7 --paste
 ```
 
 `pi-open` returns when the page is ready. The page is ready when:
@@ -68,6 +70,22 @@ sdtest -s=demo pi-set mode get
 The output shows `ready` and the time that the command waited. After the time limit, the
 command returns with `ready: false` and the reason. Change the limit with `--timeout`
 (default: 5000 ms). With `--no-wait`, the command waits only for the connection.
+
+- `pi-set` assigns the value of a field and dispatches `input` and `change`. It sends no key
+  events.
+- `pi-type` types into a text field with real keyboard input. Use it to test input filters
+  (`beforeinput`, key handlers). Each character sends `keydown`, `keypress`, `beforeinput`,
+  `input` and `keyup`.
+- The keys are those of a US keyboard layout. Shift is held for a character that needs it
+  (`A`, `!`). A character that has no key on a US keyboard sends only `beforeinput` and `input`.
+- `pi-type` first deletes the current value with Backspace. With `--no-clear`, the text goes
+  at the end of the current value.
+- `--paste` inserts the text with one clipboard paste (Ctrl+V, or Cmd+V on macOS). The field
+  gets `paste`, then `beforeinput` and `input` with the input type `insertFromPaste`. The
+  headless browser has its own clipboard. The system clipboard does not change.
+- The focus stays in the field. `--blur` moves the focus out, and then `change` fires.
+
+In a scenario, the step is `piType` with `text`, and optionally `clear`, `paste` and `blur`.
 
 ## Scenarios
 
