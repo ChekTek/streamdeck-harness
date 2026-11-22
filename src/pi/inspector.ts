@@ -280,6 +280,10 @@ export class Inspector {
 					return { ok: false as const, error: `"${name}" is not a text field. Use pi-set for it.` };
 				}
 
+				if (!element.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true })) {
+					return { ok: false as const, error: `"${name}" is hidden.` };
+				}
+
 				inner.focus();
 				if (!inner.matches(":focus")) {
 					return { ok: false as const, error: `"${name}" cannot take focus. It is hidden or disabled.` };
