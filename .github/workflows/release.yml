@@ -120,7 +120,7 @@ jobs:
 
       - name: Stage
         # The version is not public until a maintainer approves it on npmjs.com.
-        run: npm stage publish out/*.tgz --access public --ignore-scripts
+        run: npm stage publish ./out/*.tgz --access public --ignore-scripts
 
   release:
     name: Release
