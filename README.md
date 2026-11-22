@@ -31,7 +31,10 @@ sdtest install-browser
 | Test the property inspector                    | `pi-open`, `pi-set`, `pi-type`, `pi-fields` |
 | Read the messages and logs                     | `events`, `violations`, `logs`              |
 
-Run `sdtest help` for the full list. Add `--json` to a command for JSON output.
+Run `sdtest help` for the full list, and `sdtest <command> --help` for the arguments of one
+command. Add `--json` to a command for JSON output.
+
+`events` shows one line for each message. Add `--payload` to see the payload of each message.
 
 ## Sessions
 
@@ -48,6 +51,19 @@ sdtest -s=demo close
 - Refer to an action by its context id, or by its action UUID when only one instance exists.
 - A session stops after 15 minutes without use. Change this with `--idle-timeout`.
 - `sdtest list` shows the sessions.
+- `close` deletes the screenshots and other artifacts of the session. Add `--keep-artifacts`
+  to keep them.
+
+`start` can set the state that the plugin finds when it starts:
+
+```bash
+sdtest -s=demo start path/to/plugin --global-settings '{"apiKey":"test"}' --env '{"HOME":"/tmp/home"}'
+```
+
+- `--global-settings` puts global settings in the host before the plugin starts. The plugin
+  gets them when it sends `getGlobalSettings`.
+- `--env` sets environment variables for the plugin process. The plugin also gets the
+  environment of the shell that ran `start`.
 
 ## Property inspector
 
@@ -79,6 +95,8 @@ choose an interval that covers its expected response time.
 A scenario `piOpen` step fails if the page is not ready. Set `timeout` in milliseconds to
 change its limit, or `wait: false` to check only the connection.
 
+- `pi-visible <selector-or-text>` tells if an element is shown. An element in a hidden parent,
+  such as a tab that is not selected, is not shown.
 - `pi-set` assigns the value of a field and dispatches `input` and `change`. It sends no key
   events.
 - `pi-type` types into a text field with real keyboard input. Use it to test input filters
@@ -94,6 +112,7 @@ change its limit, or `wait: false` to check only the connection.
 - The focus stays in the field. `--blur` moves the focus out, and then `change` fires.
 
 In a scenario, the step is `piType` with `text`, and optionally `clear`, `paste` and `blur`.
+The steps `piVisible` and `piHidden` fail when an element is not in that state.
 
 ## Scenarios
 
@@ -104,6 +123,9 @@ sdtest run examples/lifecycle-fixture.yaml
 ```
 
 See [examples](examples) for the steps and assertions.
+
+The top-level keys `globalSettings` and `env` do the same as `--global-settings` and `--env` of
+`start`. To change global settings while the plugin runs, use a `setGlobalSettings` step.
 
 ## Mock host
 

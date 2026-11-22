@@ -13,6 +13,11 @@ steps:
     piOpen: clean
     timeout: 1000
 
+  - name: The heading is shown, and no error element exists
+    piVisible: Readiness fixture
+
+  - piHidden: "#error"
+
   - name: Type immediately after opening without a settle delay
     piType: label
     text: " ready"

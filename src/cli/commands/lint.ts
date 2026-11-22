@@ -23,6 +23,8 @@ function collect(target: string, into: string[]): void {
 	}
 }
 
+export const LINT_USAGE = "lint-svg [paths] [--strict]";
+
 /** Lints SVG files against SVG Tiny 1.2 and the Stream Deck renderer. No session is necessary. */
 export function lintCommand(args: Args): void {
 	const inputs = args.positional.length > 0 ? args.positional : ["."];

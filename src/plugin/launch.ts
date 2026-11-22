@@ -2,7 +2,7 @@ import { type ChildProcessByStdio, spawn } from "node:child_process";
 import { EventEmitter } from "node:events";
 import type { Readable } from "node:stream";
 
-import type { RegistrationInfo } from "../host/protocol.js";
+import { isJsonBoolean, isJsonNumber, isJsonString, type JsonObject, type RegistrationInfo } from "../host/protocol.js";
 import type { PluginProject } from "./manifest.js";
 
 /** Matches the line that Node prints for `--inspect`. The group is the inspector URL. */
@@ -17,8 +17,21 @@ export type LaunchOptions = {
 	nodePath?: string;
 	/** Set to false to start without `--inspect`. Memory and handle data are then not available. */
 	inspect?: boolean;
+	/** Environment variables for the plugin process. They go on top of the environment of the daemon. */
 	env?: NodeJS.ProcessEnv;
 };
+
+/** Reads environment variables from a JSON object. A string, number or boolean value becomes text. */
+export function parsePluginEnv(value: JsonObject, source: string): NodeJS.ProcessEnv {
+	const env: NodeJS.ProcessEnv = {};
+	for (const [name, entry] of Object.entries(value)) {
+		if (!isJsonString(entry) && !isJsonNumber(entry) && !isJsonBoolean(entry)) {
+			throw new Error(`${source}.${name}: expected a string, a number, or true or false`);
+		}
+		env[name] = String(entry);
+	}
+	return env;
+}
 
 export type OutputLine = {
 	stream: "stderr" | "stdout";

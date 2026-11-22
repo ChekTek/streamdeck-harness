@@ -9,6 +9,7 @@ import {
 	type JsonValue,
 	parseJsonValue,
 } from "../host/protocol.js";
+import { parsePluginEnv } from "../plugin/launch.js";
 import { daemonLogPath, metaPath, sessionDir, socketPath } from "./paths.js";
 import { Daemon } from "./server.js";
 import { Session, type SessionOptions } from "./session.js";
@@ -68,6 +69,12 @@ function parseStartFile(value: JsonValue, name: string): SessionOptions & { idle
 	}
 	if (isJsonNumber(value.idleTimeoutMs)) {
 		options.idleTimeoutMs = value.idleTimeoutMs;
+	}
+	if (isJsonObject(value.globalSettings)) {
+		options.globalSettings = value.globalSettings;
+	}
+	if (isJsonObject(value.env)) {
+		options.env = parsePluginEnv(value.env, "start.json env");
 	}
 	if (Array.isArray(value.devices)) {
 		options.devices = value.devices.filter((entry) => isJsonString(entry));

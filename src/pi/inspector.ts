@@ -1,5 +1,5 @@
 import { join } from "node:path";
-import type { Page } from "playwright";
+import type { Locator, Page } from "playwright";
 
 import type { ActionInstance } from "../host/action.js";
 import {
@@ -134,11 +134,7 @@ export class Inspector {
 	}
 
 	public async click(target: string): Promise<void> {
-		const locator =
-			target.startsWith("#") || target.startsWith(".") || target.includes("[")
-				? this.#page.locator(target)
-				: this.#page.getByText(target, { exact: false });
-		await locator.first().click({ timeout: 5000 });
+		await this.#locate(target).click({ timeout: 5000 });
 	}
 
 	public async close(): Promise<void> {
@@ -353,6 +349,18 @@ export class Inspector {
 		return compactJson({ setting, value });
 	}
 
+	/** Tells if the first element that matches a CSS selector or visible text exists and is shown. */
+	public async visibility(target: string): Promise<{ found: boolean; visible: boolean }> {
+		const locator = this.#locate(target);
+		if ((await locator.count()) === 0) {
+			return { found: false, visible: false };
+		}
+		const visible = await locator.evaluate((element) =>
+			element.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true }),
+		);
+		return { found: true, visible };
+	}
+
 	/** Waits until the page connects to the host. Returns false after `timeoutMs`. */
 	public async waitForConnect(timeoutMs: number): Promise<boolean> {
 		try {
@@ -396,6 +404,15 @@ export class Inspector {
 				await new Promise((done) => setTimeout(done, READY_POLL_MS));
 			}
 		}
+	}
+
+	/** The first element that matches `target`: a CSS selector, or else text in the page. */
+	#locate(target: string): Locator {
+		const locator =
+			target.startsWith("#") || target.startsWith(".") || target.includes("[")
+				? this.#page.locator(target)
+				: this.#page.getByText(target, { exact: false });
+		return locator.first();
 	}
 
 	/**
