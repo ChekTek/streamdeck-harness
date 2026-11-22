@@ -3,16 +3,12 @@ import sax from "sax";
 import { errorMessage } from "../host/protocol.js";
 
 /**
- * SVG Tiny 1.2 / Stream Deck renderer compatibility linter.
+ * Lints SVG for Stream Deck. Stream Deck draws key images with the Qt SVG renderer, which
+ * supports SVG Tiny 1.2. Chromium supports more, so a correct screenshot does not prove
+ * that the key is correct on a device.
  *
- * Stream Deck rasterises key images with Qt's SVG renderer, which targets SVG Tiny 1.2.
- * Chromium renders far more than that, so a screenshot alone will happily show a key that
- * is blank or wrong on real hardware. This lint is the compatibility truth; the screenshot
- * is only what the artwork is meant to look like.
- *
- * Findings carry `source: "tiny12"` when the construct is absent from the SVG Tiny 1.2
- * element/attribute set, and `source: "renderer"` when it exists but Qt ignores or
- * mishandles it. Both matter; the distinction tells you whether to blame the spec or the app.
+ * A finding has `source: "tiny12"` when SVG Tiny 1.2 does not define the construct. It has
+ * `source: "renderer"` when Qt ignores the construct.
  */
 
 export type FindingSeverity = "error" | "warning";
@@ -34,7 +30,7 @@ export type LintResult = {
 	warnings: number;
 };
 
-/** Elements defined by SVG Tiny 1.2 (W3C element index). */
+/** Elements that SVG Tiny 1.2 defines. */
 const TINY_ELEMENTS = new Set([
 	"a",
 	"animate",
@@ -85,7 +81,7 @@ const TINY_ELEMENTS = new Set([
 	"video",
 ]);
 
-/** Elements outside Tiny 1.2 that Stream Deck drops outright, with the usual workaround. */
+/** Elements that Stream Deck does not draw, with a fix for each. */
 const UNSUPPORTED_ELEMENTS = {
 	filter:
 		"Draw the effect explicitly -- e.g. a drop shadow becomes a duplicated shape offset by a few units at a lower fill-opacity.",
@@ -104,7 +100,7 @@ const UNSUPPORTED_ELEMENTS = {
 	cursor: "Remove it; there is no pointer on a Stream Deck key.",
 } as const;
 
-/** Attributes Stream Deck ignores or cannot honour, with what to do instead. */
+/** Attributes that Stream Deck ignores, with a fix for each. */
 const UNSUPPORTED_ATTRIBUTES = {
 	filter: { severity: "error", source: "tiny12", fix: "Draw the effect explicitly instead of referencing a <filter>." },
 	mask: { severity: "error", source: "tiny12", fix: "Remove the mask reference and trim the geometry instead." },
@@ -139,10 +135,7 @@ const UNSUPPORTED_ATTRIBUTES = {
 	},
 } as const;
 
-/**
- * `rgba()`, `hsla()`, the slash-alpha form, and 4/8-digit hex all encode alpha in the colour,
- * which SVG Tiny 1.2 expresses with a separate `*-opacity` property instead.
- */
+/** Matches a hex colour with alpha: `#` and 4 or 8 hex digits. SVG Tiny 1.2 has no alpha in colours. */
 const HEX_ALPHA = /^#(?:[0-9a-fA-F]{4}|[0-9a-fA-F]{8})$/;
 const FUNCTIONAL_ALPHA = /^(?:rgba|hsla)\(/i;
 const SLASH_ALPHA = /^(?:rgb|hsl)\([^)]*\/[^)]*\)$/i;
@@ -161,8 +154,7 @@ export function lintSvg(source: string, file = "<inline>"): LintResult {
 
 	let rootSeen = false;
 
-	// sax reports the position *after* the tag it just parsed; `startTagPosition` is the
-	// offset of the opening `<`, which is what an editor should jump to.
+	// sax gives the position after the tag. `startTagPosition` is the position of the opening `<`.
 	const at = (): { line: number; column: number } =>
 		parser.startTagPosition > 0
 			? offsetToPosition(lineStarts, parser.startTagPosition - 1)
@@ -380,10 +372,7 @@ function checkAttributes(
 	}
 }
 
-/**
- * Applies the attribute rules to CSS declarations inside a `style` attribute. Qt honours
- * `style` itself -- what it cannot honour are the same properties that fail as attributes.
- */
+/** Applies the attribute rules to the CSS declarations in a `style` attribute. */
 function checkStyleDeclarations(style: string, add: (finding: Omit<Finding, "column" | "line">) => void): void {
 	for (const declaration of style.split(";")) {
 		const separator = declaration.indexOf(":");
@@ -426,7 +415,7 @@ function checkStyleDeclarations(style: string, add: (finding: Omit<Finding, "col
 	}
 }
 
-/** Character offsets at which each line begins, for translating sax offsets to line/column. */
+/** Returns the character offset of each line start. */
 function indexLines(source: string): number[] {
 	const starts = [0];
 	for (let index = 0; index < source.length; index++) {
@@ -465,7 +454,7 @@ function truncate(value: string, limit = 48): string {
 	return value.length <= limit ? value : `${value.slice(0, limit - 1)}...`;
 }
 
-/** Renders findings the way compilers do, so editors and agents can jump straight to them. */
+/** Formats the findings as `file:line:column` lines. */
 export function formatFindings(result: LintResult): string {
 	if (result.findings.length === 0) {
 		return `${result.file}: clean`;

@@ -1,9 +1,7 @@
 const PERCENT = "%".charCodeAt(0);
 
 /**
- * Splits a `data:` URI into its media type and decoded text. Media-type parameters such as
- * `;charset=utf-8` are accepted. The body is percent-decoded the way Stream Deck decodes it,
- * so raw SVG passes through except where it contains a `%`. Returns undefined when `uri` is
+ * Splits a `data:` URI into its media type and decoded text. Returns undefined when `uri` is
  * not a data URI.
  */
 export function parseDataUri(uri: string): DataUri | undefined {
@@ -23,10 +21,8 @@ export function parseDataUri(uri: string): DataUri | undefined {
 }
 
 /**
- * Decodes like the Qt decoder Stream Deck uses, which never rejects input: a `%` with two
- * bytes after it always consumes both, whether or not they are hex digits. A first byte that
- * is not a hex digit leaves the `%` in place and a second one counts as zero, so unencoded
- * markup such as `width="100%" height="72"` loses the two characters after the `%`.
+ * Decodes percent-encoding the same way as Stream Deck. A `%` always uses the two bytes after
+ * it, so unencoded text such as `width="100%" height="72"` loses two characters.
  */
 function percentDecode(body: string): string {
 	const input = Buffer.from(body, "utf8");

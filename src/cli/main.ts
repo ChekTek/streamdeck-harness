@@ -10,6 +10,7 @@ import {
 } from "../host/protocol.js";
 import { type Args, flagBool, flagJson, flagList, flagNumber, flagString, parseArgs } from "./args.js";
 import { DaemonClient } from "./client.js";
+import { installBrowserCommand } from "./commands/browser.js";
 import { lintCommand } from "./commands/lint.js";
 import { runCommand } from "./commands/run.js";
 import { closeCommand, listCommand, startCommand } from "./commands/sessions.js";
@@ -49,10 +50,7 @@ function ref(args: Args): string {
 	return value;
 }
 
-/**
- * CLI values arrive as strings. SDPI checkboxes need booleans and numeric fields need
- * numbers, so obvious literals are coerced; `--raw` forces the string through unchanged.
- */
+/** Converts a CLI string to a boolean, a number or null when it is one. `raw` keeps the string. */
 function coerce(value: string | undefined, raw: boolean): JsonValue {
 	if (value === undefined || raw) {
 		return value ?? "";
@@ -630,6 +628,7 @@ function helpText(): string {
 		["list", "List sessions."],
 		["lint-svg <paths>", "Check SVGs against SVG Tiny 1.2 and the Stream Deck renderer (no session needed)."],
 		["run <scenario.yaml>", "Run a whole declarative check in one call and print a single report."],
+		["install-browser", "Download the Chromium that screenshots and the property inspector use."],
 		...Object.entries(REMOTE).map(([verb, remote]) => [verb, remote.summary]),
 	];
 	return [
@@ -652,25 +651,25 @@ async function main(): Promise<void> {
 		return;
 	}
 
-	if (args.verb === "start") {
-		await startCommand(args);
-		return;
-	}
-	if (args.verb === "close") {
-		await closeCommand(args);
-		return;
-	}
-	if (args.verb === "list") {
-		listCommand();
-		return;
-	}
-	if (args.verb === "lint-svg") {
-		lintCommand(args);
-		return;
-	}
-	if (args.verb === "run") {
-		await runCommand(args);
-		return;
+	switch (args.verb) {
+		case "start":
+			await startCommand(args);
+			return;
+		case "close":
+			await closeCommand(args);
+			return;
+		case "list":
+			listCommand();
+			return;
+		case "lint-svg":
+			lintCommand(args);
+			return;
+		case "run":
+			await runCommand(args);
+			return;
+		case "install-browser":
+			installBrowserCommand();
+			return;
 	}
 
 	const remote = remoteFor(args.verb);

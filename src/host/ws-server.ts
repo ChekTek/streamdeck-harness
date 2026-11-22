@@ -37,15 +37,11 @@ export type AddActionOptions = {
 	state?: number;
 	title?: string;
 	isInMultiAction?: boolean;
-	/** When false the instance is created but no `willAppear` is sent yet. */
+	/** When false, the host creates the instance but does not send `willAppear`. */
 	appear?: boolean;
 };
 
-/**
- * A mock Stream Deck backend: one WebSocket server that speaks the plugin protocol on one
- * side and the property inspector protocol on the other, with the host owning device
- * state and settings exactly as the real application does.
- */
+/** Mock Stream Deck host. One WebSocket server talks to the plugin and to the property inspector. */
 export class MockStreamDeck extends EventEmitter {
 	public readonly devices: Device[];
 	public readonly pluginUuid = newIdentifier();
@@ -58,7 +54,7 @@ export class MockStreamDeck extends EventEmitter {
 	readonly #info: RegistrationInfo;
 	readonly #actions = new Map<string, ActionInstance>();
 	readonly #uiSockets = new Map<string, WebSocket>();
-	/** Payloads already linted, so a plugin redrawing a key 60x a second is linted once. */
+	/** Payloads that the lint already checked. */
 	readonly #lintedImages = new Set<string>();
 
 	#server: WebSocketServer | undefined;
@@ -157,7 +153,7 @@ export class MockStreamDeck extends EventEmitter {
 			device: instance.device.id,
 			payload: this.#appearPayload(instance),
 		});
-		// The real app emits titleParametersDidChange immediately after willAppear.
+		// Stream Deck sends titleParametersDidChange immediately after willAppear.
 		this.#emitTitleParameters(instance);
 	}
 
@@ -265,7 +261,7 @@ export class MockStreamDeck extends EventEmitter {
 		this.#sendToPlugin({ event: "didReceiveSecrets", payload: { secrets: this.settings.getSecrets() } });
 	}
 
-	/** Pushes settings from the harness, as if the user edited them in the property inspector. */
+	/** Sends new settings to the plugin, as the property inspector does. */
 	public pushSettings(instance: ActionInstance, settings: JsonObject): void {
 		this.settings.set(instance.context, settings);
 		this.#sendToPlugin(this.#settingsFrame("didReceiveSettings", instance));
@@ -282,12 +278,12 @@ export class MockStreamDeck extends EventEmitter {
 		this.settings.forget(instance.context);
 	}
 
-	/** Sends an arbitrary event to the plugin; used by the scenario runner for system events. */
+	/** Sends an event to the plugin as it is. */
 	public sendRaw(frame: Frame): void {
 		this.#sendToPlugin(frame);
 	}
 
-	/** Resolves once the plugin has completed the `registerPlugin` handshake. */
+	/** Resolves when the plugin completes the `registerPlugin` handshake. */
 	public async waitForPlugin(timeoutMs: number): Promise<void> {
 		let timer: NodeJS.Timeout | undefined;
 		const timeout = new Promise<never>((_, reject) => {
@@ -344,7 +340,7 @@ export class MockStreamDeck extends EventEmitter {
 		this.#resolveRegistered();
 		this.emit("plugin-registered");
 
-		// The real app announces devices immediately after the handshake.
+		// Stream Deck reports the devices immediately after the handshake.
 		for (const device of this.devices) {
 			this.#sendToPlugin({
 				event: "deviceDidConnect",
@@ -422,8 +418,7 @@ export class MockStreamDeck extends EventEmitter {
 		const instance = context === undefined ? undefined : this.#actions.get(context);
 		const payload = isJsonObject(frame.payload) ? frame.payload : {};
 
-		// A command naming a context that has already disappeared is the primary
-		// language-agnostic leak signal, so flag it here rather than only in the check.
+		// A command for a context that is gone is a leak signal.
 		if (
 			instance !== undefined &&
 			!instance.visible &&
@@ -450,7 +445,7 @@ export class MockStreamDeck extends EventEmitter {
 			case "setSettings":
 				if (context !== undefined) {
 					this.settings.set(context, payload);
-					// Real Stream Deck notifies the *other* side only.
+					// Stream Deck tells only the other side.
 					if (this.#uiSockets.has(context) && instance !== undefined) {
 						this.#sendToUi(context, this.#settingsFrame("didReceiveSettings", instance));
 					}
@@ -513,8 +508,8 @@ export class MockStreamDeck extends EventEmitter {
 				}
 				break;
 			default:
-				// openUrl, logMessage, switchToProfile, setTriggerDescription, setFeedback,
-				// setFeedbackLayout: recorded above, inert here.
+				// openUrl, logMessage, switchToProfile, setTriggerDescription, setFeedback and
+				// setFeedbackLayout are recorded only.
 				break;
 		}
 
@@ -569,10 +564,7 @@ export class MockStreamDeck extends EventEmitter {
 		}
 	}
 
-	/**
-	 * Lints inline SVG sent through `setImage`. Chromium will render constructs Stream Deck
-	 * silently drops, so the screenshot alone would not reveal the problem.
-	 */
+	/** Lints an SVG from `setImage`. Chromium can draw markup that Stream Deck does not. */
 	#lintImagePayload(instance: ActionInstance, image: string): void {
 		if (!image.startsWith("data:image/svg+xml")) {
 			return;
@@ -682,7 +674,7 @@ export class MockStreamDeck extends EventEmitter {
 				}
 				break;
 			default:
-				// openUrl: recorded, inert.
+				// openUrl is recorded only.
 				break;
 		}
 
@@ -794,7 +786,7 @@ function tcpPort(address: AddressInfo | string | null): number {
 	return address.port;
 }
 
-/** Commands that only make sense while a key is on screen. */
+/** Commands that need a key on screen. */
 function isVisualCommand(event: string): boolean {
 	return (
 		event === "setImage" ||

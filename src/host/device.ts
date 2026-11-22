@@ -2,10 +2,7 @@ import { randomBytes } from "node:crypto";
 
 import { type DeviceInfo, DeviceTypeCode } from "./protocol.js";
 
-/**
- * Named device profiles the harness can emulate. Sizes and type codes match the
- * devices captured from a real Stream Deck 7.5 registration payload.
- */
+/** Device profiles that the harness can emulate. The values come from a real Stream Deck 7.5 registration. */
 export const DEVICE_PROFILES = {
 	"stream-deck": { name: "Stream Deck", size: { columns: 5, rows: 3 }, type: DeviceTypeCode.StreamDeck },
 	mini: { name: "Stream Deck Mini", size: { columns: 3, rows: 2 }, type: DeviceTypeCode.StreamDeckMini },
@@ -22,7 +19,7 @@ export function isDeviceProfileName(value: string): value is DeviceProfileName {
 	return Object.hasOwn(DEVICE_PROFILES, value);
 }
 
-/** Stream Deck identifiers are 32 lowercase hex characters; plugin code logs and sometimes parses them. */
+/** Returns an identifier in the Stream Deck format: 32 lowercase hex characters. */
 export function newIdentifier(): string {
 	return randomBytes(16).toString("hex");
 }

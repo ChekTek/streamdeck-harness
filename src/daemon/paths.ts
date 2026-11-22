@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
-/** Root for all session state. Overridable so tests never touch the user's real sessions. */
+/** Root directory for session state. `SDTEST_STATE_DIR` overrides it. */
 export function stateRoot(): string {
 	return process.env.SDTEST_STATE_DIR ?? join(homedir(), ".cache", "sdtest");
 }
@@ -24,9 +24,8 @@ export function artifactsDir(session: string): string {
 }
 
 /**
- * Address the daemon listens on. Unix socket paths are capped at ~104 bytes on macOS, so
- * long session directories fall back to a short path under the temp directory, named by a
- * digest of the session directory so two state roots never share a socket.
+ * Address of the daemon socket. macOS limits socket paths to about 104 bytes, so a long
+ * path falls back to a short name in the temp directory.
  */
 export function socketPath(session: string): string {
 	if (process.platform === "win32") {
@@ -43,9 +42,9 @@ export function socketPath(session: string): string {
 	return join(tmpdir(), `sdtest-${digest}.sock`);
 }
 
-/** Whether `session` is safe to use as a single directory name under the state root. */
+/** Tells if `session` is a valid session name. */
 export function isSessionName(session: string): boolean {
-	// 1-64 letters, digits, dots, dashes, or underscores: one path segment that is also valid in a pipe name.
+	// 1 to 64 letters, digits, dots, dashes or underscores. This is safe in a path and in a pipe name.
 	return /^[a-zA-Z0-9._-]{1,64}$/.test(session) && session !== "." && session !== "..";
 }
 

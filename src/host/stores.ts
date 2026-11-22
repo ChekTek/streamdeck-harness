@@ -1,9 +1,6 @@
 import type { JsonObject } from "./protocol.js";
 
-/**
- * Settings storage owned by the host, exactly as the real app owns it: the plugin and the
- * property inspector both read and write through the socket, neither holds the truth.
- */
+/** Settings storage. The host owns it. The plugin and the property inspector use the socket. */
 export class SettingsStore {
 	#global: JsonObject = {};
 	#secrets: JsonObject = {};

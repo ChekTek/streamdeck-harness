@@ -35,10 +35,7 @@ function isTcpAddress(value: AddressInfo | string | null): value is AddressInfo 
 	return value !== null && typeof value === "object";
 }
 
-/**
- * Serves the `.sdPlugin` folder over loopback HTTP. The property inspector cannot run from
- * `file://` -- relative script paths and module loading both break there.
- */
+/** Serves the `.sdPlugin` folder on loopback HTTP. The property inspector does not work from `file://`. */
 export class StaticServer {
 	readonly #root: string;
 	#server: Server | undefined;
@@ -73,7 +70,7 @@ export class StaticServer {
 				return;
 			}
 
-			// Reject anything that escapes the plugin folder.
+			// Reject paths outside the plugin folder.
 			if (target !== this.#root && !target.startsWith(this.#root + sep)) {
 				response.writeHead(403).end("forbidden");
 				return;

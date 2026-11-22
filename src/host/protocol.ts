@@ -1,16 +1,9 @@
-/**
- * Stream Deck WebSocket protocol types.
- *
- * Ported from the Rust SDK at ~/Code/streamdeck-rs
- * (`crates/streamdeck-plugin/src/protocol/{events,commands,types}.rs`), which models
- * the SDK v3 surface more completely than the published docs -- including `resources`,
- * `secrets`, and the optional `id` used by experimental message identifiers.
- */
+/** Stream Deck WebSocket protocol types for SDK v3. */
 
 export type JsonValue = JsonValue[] | boolean | number | string | { [key: string]: JsonValue } | null;
 export type JsonObject = { [key: string]: JsonValue };
 
-/** Numeric device type as it appears in `RegistrationInfo.devices[].type`. */
+/** Device type number in `RegistrationInfo.devices[].type`. */
 export const DeviceTypeCode = {
 	StreamDeck: 0,
 	StreamDeckMini: 1,
@@ -30,7 +23,7 @@ export const DeviceTypeCode = {
 
 export type Controller = "Encoder" | "Keypad";
 
-/** Hardware vs software update target for `setTitle` / `setImage`. */
+/** Target of `setTitle` and `setImage`: 0 is both, 1 is hardware, 2 is software. */
 export type Target = 0 | 1 | 2;
 
 export type Coordinates = {
@@ -76,7 +69,7 @@ export type RegistrationInfo = {
 	};
 };
 
-/** Payload carried by `willAppear`, `willDisappear`, `didReceiveSettings`, `didReceiveResources`. */
+/** Payload of `willAppear`, `willDisappear`, `didReceiveSettings` and `didReceiveResources`. */
 export type AppearPayload = {
 	controller: Controller;
 	coordinates?: Coordinates;
@@ -95,7 +88,7 @@ export type TitleParametersPayload = AppearPayload & {
 	titleParameters: TitleParameters;
 };
 
-/** Every event name the mock host can send to a plugin. */
+/** Events that the host can send to a plugin. */
 export const PLUGIN_EVENTS = [
 	"applicationDidLaunch",
 	"applicationDidTerminate",
@@ -124,7 +117,7 @@ export const PLUGIN_EVENTS = [
 
 export type PluginEventName = (typeof PLUGIN_EVENTS)[number];
 
-/** Every command name a plugin can send to the host. */
+/** Commands that a plugin can send to the host. */
 export const PLUGIN_COMMANDS = [
 	"getGlobalSettings",
 	"getResources",
@@ -149,7 +142,7 @@ export const PLUGIN_COMMANDS = [
 
 export type PluginCommandName = (typeof PLUGIN_COMMANDS)[number];
 
-/** Every command the property inspector can send to the host. */
+/** Commands that the property inspector can send to the host. */
 export const UI_COMMANDS = [
 	"getGlobalSettings",
 	"getResources",
@@ -163,7 +156,7 @@ export const UI_COMMANDS = [
 
 export type UiCommandName = (typeof UI_COMMANDS)[number];
 
-/** Events the host sends to the property inspector. */
+/** Events that the host sends to the property inspector. */
 export const UI_EVENTS = [
 	"didReceiveGlobalSettings",
 	"didReceiveResources",
@@ -171,7 +164,7 @@ export const UI_EVENTS = [
 	"sendToPropertyInspector",
 ] as const;
 
-/** A frame as it travels over either socket. Unknown shapes are preserved verbatim. */
+/** One message on a socket. Unknown fields stay as they are. */
 export type Frame = JsonObject & {
 	event: string;
 	action?: string;
@@ -213,7 +206,7 @@ export function isFrame(value: JsonValue): value is Frame {
 	return isJsonObject(value) && isJsonString(value.event);
 }
 
-/** `JSON.parse` returns `any`; this is the typed wire boundary. */
+/** Parses JSON text into a typed value. */
 export function parseJsonValue(text: string): JsonValue {
 	return JSON.parse(text);
 }
@@ -234,7 +227,7 @@ export function parseFrame(text: string): Frame {
 	return value;
 }
 
-/** Copies defined values into a JSON object, omitting keys whose values are undefined. */
+/** Builds a JSON object and leaves out the undefined values. */
 // eslint-disable-next-line @typescript-eslint/explicit-function-return-type -- JsonObject return annotation is open-dictionary widening
 export function compactJson(fields: { [key: string]: JsonValue | undefined }) {
 	const result: JsonObject = {};
@@ -251,6 +244,6 @@ export function errorMessage(cause: unknown): string {
 	return cause instanceof Error ? cause.message : String(cause);
 }
 
-/** Registration event names accepted on the WebSocket. */
+/** Registration event names. */
 export const REGISTER_PLUGIN = "registerPlugin";
 export const REGISTER_PROPERTY_INSPECTOR = "registerPropertyInspector";

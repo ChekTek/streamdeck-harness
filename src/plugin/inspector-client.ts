@@ -27,13 +27,7 @@ export type MemoryUsage = {
 	arrayBuffers: number;
 };
 
-/**
- * Chrome DevTools Protocol client for the plugin's Node inspector.
- *
- * This is what makes the lifecycle check precise rather than a guess: forcing a GC and then
- * reading the heap and the active-handle table gives exact numbers, where sampling RSS only
- * gives allocator noise.
- */
+/** Chrome DevTools Protocol client for the Node inspector of the plugin. */
 export class InspectorClient {
 	readonly #socket: WebSocket;
 	readonly #pending = new Map<number, Pending>();
@@ -106,10 +100,7 @@ export class InspectorClient {
 		return client;
 	}
 
-	/**
-	 * Counts the process's active libuv handles and requests by type. A `Timeout` count that
-	 * grows once per appear/disappear cycle is an uncleared `setInterval`, named outright.
-	 */
+	/** Counts the active handles and requests of the process, by type. */
 	public async activeResources(): Promise<{ [type: string]: number }> {
 		const result = await this.send(
 			"Runtime.evaluate",
@@ -139,18 +130,12 @@ export class InspectorClient {
 		this.#socket.close();
 	}
 
-	/** Forces a full GC so the heap reading reflects what is actually retained. */
+	/** Forces a full GC. */
 	public async collectGarbage(): Promise<void> {
 		await this.send("HeapProfiler.collectGarbage");
 	}
 
-	/**
-	 * Full memory accounting from inside the process.
-	 *
-	 * `Runtime.getHeapUsage` reports only the V8 JS heap, which misses Buffers and
-	 * ArrayBuffers entirely -- and Stream Deck plugins buffer image bytes constantly, so a
-	 * retained avatar or icon would go unnoticed. `process.memoryUsage()` covers both.
-	 */
+	/** Reads `process.memoryUsage()` in the plugin. This includes Buffers, which the V8 heap does not. */
 	public async memoryUsage(): Promise<MemoryUsage | undefined> {
 		const result = await this.send(
 			"Runtime.evaluate",
@@ -193,7 +178,7 @@ export class InspectorClient {
 		});
 	}
 
-	/** Writes a `.heapsnapshot` openable in Chrome DevTools and returns its raw JSON. */
+	/** Takes a heap snapshot and returns its JSON. */
 	public async takeHeapSnapshot(): Promise<string> {
 		this.#snapshotChunks.length = 0;
 		await this.send(
@@ -211,7 +196,7 @@ function cdpRemoteValue(result: JsonValue): JsonValue | undefined {
 	return result.result.value;
 }
 
-/** Resident set size in bytes, for plugins with no inspector to attach to. */
+/** Resident set size in bytes. Used when the plugin has no inspector. */
 export async function readRss(pid: number): Promise<number | undefined> {
 	try {
 		if (process.platform === "win32") {
@@ -231,10 +216,7 @@ export async function readRss(pid: number): Promise<number | undefined> {
 	}
 }
 
-/**
- * Summarises a V8 heap snapshot by constructor name. The snapshot's `nodes` array is a flat
- * run of fixed-width records described by `snapshot.meta.node_fields`.
- */
+/** Summarizes a V8 heap snapshot by constructor name. */
 export function summariseHeapSnapshot(
 	json: string,
 	limit = 15,

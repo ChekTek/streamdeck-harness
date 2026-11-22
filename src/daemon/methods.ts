@@ -70,10 +70,7 @@ function isDirection(value: string): value is Direction {
 	);
 }
 
-/**
- * Resolves an action reference: a context id, or an action UUID when exactly one instance
- * of it exists. Agents overwhelmingly have the UUID, not the generated context.
- */
+/** Finds an action by context id, or by action UUID when only one instance exists. */
 function resolve(session: Session, ref: string): ActionInstance {
 	const byContext = session.host.allActions().find((instance) => instance.context === ref);
 	if (byContext !== undefined) {
@@ -151,7 +148,7 @@ export const methods = {
 	},
 
 	close({ shutdown }: MethodContext): JsonValue {
-		// Reply first: the shutdown tears down the very connection carrying this response.
+		// Reply first. The shutdown closes this connection.
 		setTimeout(() => void shutdown("requested"), 0);
 		return compactJson({ closed: true });
 	},
@@ -233,10 +230,7 @@ export const methods = {
 		return describeInstance(session, resolve(session, requireStr(params, "ref")));
 	},
 
-	/**
-	 * Renders the key as Stream Deck would show it and writes a PNG. The SVG source and its
-	 * Tiny 1.2 lint come back alongside -- reading those is cheaper than reading the image.
-	 */
+	/** Renders the key to a PNG. Also returns the SVG source and its lint result. */
 	async screenshot({ session }: MethodContext, params: JsonObject): Promise<JsonValue> {
 		const instance = resolve(session, requireStr(params, "ref"));
 		const size = num(params, "size") ?? 144;
@@ -558,7 +552,7 @@ export const methods = {
 	},
 } satisfies { [name: string]: Method };
 
-/** Methods that only read session state (or end it), so they need not wait behind one that changes it. */
+/** Methods that can run at the same time as other requests. */
 const CONCURRENT_METHODS: readonly string[] = [
 	"info",
 	"close",
@@ -578,10 +572,7 @@ const CONCURRENT_METHODS: readonly string[] = [
 	"output",
 ] satisfies Array<keyof typeof methods>;
 
-/**
- * Whether `name` may run alongside other requests. Everything else changes the session and
- * is run one at a time.
- */
+/** Tells if `name` can run at the same time as other requests. All other methods run one at a time. */
 export function isConcurrent(name: string): boolean {
 	return CONCURRENT_METHODS.includes(name);
 }

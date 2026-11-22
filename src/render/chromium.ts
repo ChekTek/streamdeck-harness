@@ -3,10 +3,7 @@ import { type Browser, chromium } from "playwright";
 let browser: Browser | undefined;
 let starting: Promise<Browser> | undefined;
 
-/**
- * One headless Chromium per daemon, shared by key rendering and the property inspector.
- * Always headless: the point of the harness is that the user keeps their desktop.
- */
+/** Returns the headless Chromium of the daemon. Starts it on first use. */
 export async function getBrowser(): Promise<Browser> {
 	if (browser !== undefined && browser.isConnected()) {
 		return browser;
@@ -23,7 +20,7 @@ export async function getBrowser(): Promise<Browser> {
 			const message = cause instanceof Error ? cause.message : String(cause);
 			throw new Error(
 				message.includes("Executable doesn't exist")
-					? "Chromium is not installed. Run: pnpm --dir <harness> browser  (or: npx playwright install chromium)"
+					? "Chromium is not installed. Run: sdtest install-browser"
 					: message,
 			);
 		});

@@ -17,14 +17,11 @@ export type SessionOptions = {
 	devices?: string[];
 	nodePath?: string;
 	inspect?: boolean;
-	/** Milliseconds to wait for `registerPlugin` before giving up. */
+	/** Time limit for `registerPlugin`, in milliseconds. */
 	registerTimeoutMs?: number;
 };
 
-/**
- * One running plugin under test: the mock host, the plugin process, and everything derived
- * from them. Owned by the daemon so a session survives between CLI invocations.
- */
+/** One plugin under test: the mock host and the plugin process. */
 export class Session {
 	public readonly artifacts: string;
 
@@ -36,7 +33,7 @@ export class Session {
 	public readonly plugin: PluginProcess;
 
 	public readonly project: PluginProject;
-	/** The property inspector currently open, if any. Stream Deck shows at most one. */
+	/** The open property inspector, if there is one. */
 	public propertyInspector: Inspector | undefined;
 
 	public readonly startedAt = Date.now();
@@ -87,7 +84,7 @@ export class Session {
 			inspect: options.inspect,
 		});
 
-		// A plugin that dies before registering would otherwise hang the handshake wait.
+		// Fail the handshake when the plugin exits before registration.
 		plugin.on("exit", (exit: { code: number | null; signal: string | null }) => {
 			host.failRegistration(
 				new Error(`plugin exited before registering (code ${String(exit.code)}, signal ${String(exit.signal)})`),
@@ -154,7 +151,7 @@ export class Session {
 		});
 	}
 
-	/** Diagnostics worth printing when startup fails: process output plus the plugin's own error log. */
+	/** Returns the process output and the plugin error log for a failed start. */
 	public failureDetail(): string {
 		const output = this.plugin.output
 			.slice(-20)

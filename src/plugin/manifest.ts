@@ -60,16 +60,13 @@ export type PluginProject = {
 	/** Absolute path of `manifest.json`. */
 	manifestPath: string;
 	manifest: Manifest;
-	/** `node` when the manifest declares a `Nodejs` block, otherwise a native binary. */
+	/** `node` when the manifest has a `Nodejs` block. Otherwise `native`. */
 	runtime: "native" | "node";
 	/** Absolute path of the entry point for the current platform. */
 	codePath: string;
 };
 
-/**
- * Resolves a user-supplied path to a `*.sdPlugin` folder. Accepts the folder itself, a
- * `manifest.json`, or a project root containing exactly one `*.sdPlugin` folder.
- */
+/** Finds the `*.sdPlugin` folder from the folder, its `manifest.json`, or a project root. */
 export function findPluginRoot(input: string): string {
 	const target = resolve(input);
 	if (!existsSync(target)) {
@@ -273,10 +270,7 @@ export function findAction(manifest: Manifest, uuid: string): ManifestAction {
 	throw new Error(`no action ${uuid} in manifest. Known actions:\n  ${known}`);
 }
 
-/**
- * Manifest image paths are extensionless -- Stream Deck appends the extension itself.
- * Resolution order matches the app: SVG first, then the high-DPI raster, then the raster.
- */
+/** Finds a manifest image. Manifest paths have no extension, so it tries `.svg`, `@2x.png`, then `.png`. */
 export function resolveImagePath(root: string, relative: string): string | undefined {
 	const base = join(root, relative);
 	for (const candidate of [`${base}.svg`, `${base}@2x.png`, `${base}.png`, base]) {

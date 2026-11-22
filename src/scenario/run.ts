@@ -16,9 +16,8 @@ import type { Expectation, Scenario, ScenarioReport, Step, StepResult } from "./
 type Aliases = Map<string, string>;
 
 /**
- * Executes a scenario against an already-running session, collecting a per-step report.
- * Steps run in order; a failed assertion is recorded and the run continues, so one report
- * shows everything that is wrong rather than only the first problem.
+ * Runs a scenario in an open session and returns a report for each step. A failed assertion
+ * does not stop the run.
  */
 export async function runScenario(
 	client: DaemonClient,
@@ -62,7 +61,7 @@ export async function runScenario(
 	};
 }
 
-/** Paths in a scenario are relative to the scenario file, and may start with `~/`. */
+/** Resolves a scenario path. Paths are relative to the scenario file and can start with `~/`. */
 export function resolvePath(value: string, baseDir: string): string {
 	if (value.startsWith("~/")) {
 		return resolve(process.env.HOME ?? "", value.slice(2));

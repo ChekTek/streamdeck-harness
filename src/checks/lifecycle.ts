@@ -21,11 +21,11 @@ export type LifecycleOptions = {
 
 export type Sample = {
 	cycle: number;
-	/** V8 JS heap after a forced GC. */
+	/** V8 heap size after a forced GC. */
 	heapUsed: number | undefined;
-	/** Memory held outside the JS heap -- Buffers, ArrayBuffers, native allocations. */
+	/** Memory outside the V8 heap, such as Buffers. */
 	external: number | undefined;
-	/** `heapUsed + external`: everything the plugin is holding on to. */
+	/** `heapUsed` plus `external`. */
 	retained: number | undefined;
 	rss: number | undefined;
 	handles: Record<string, number>;
@@ -38,7 +38,7 @@ export type LifecycleReport = {
 	cycles: number;
 	warmup: number;
 	samples: Sample[];
-	/** Slope of `heapUsed + external` across the kept cycles. */
+	/** Growth of retained memory per cycle. */
 	retainedBytesPerCycle: number | undefined;
 	retainedSlopeStdError: number | undefined;
 	heapBytesPerCycle: number | undefined;
@@ -47,7 +47,7 @@ export type LifecycleReport = {
 	handlesPerCycle: Record<string, number>;
 	commandsAfterDisappear: number;
 	afterDisappearDetail: string[];
-	/** Cycles in which the plugin never stopped sending frames. */
+	/** Number of cycles in which the plugin did not go quiet. */
 	settleTimeouts: number;
 	otherLiveActions: number;
 	verdict: "inconclusive" | "leak" | "pass";
@@ -66,21 +66,17 @@ export const LIFECYCLE_DEFAULTS = {
 	maxHandlesPerCycle: 0,
 } as const;
 
-/** Fewest measured cycles a growth slope can be fitted to. */
+/** Minimum number of cycles for a slope. */
 const MIN_TREND_CYCLES = 3;
 
 /**
- * Drives an action through repeated appear/interact/disappear cycles and reports whether it
- * gives back what it took.
+ * Runs an action through appear, interact and disappear cycles. Reports if the action
+ * releases its resources.
  *
- * Three independent signals, strongest last:
- *  - heap growth per cycle, measured after a forced GC;
- *  - active libuv handles per cycle, which names the leaked resource type outright;
- *  - whether the plugin sent any command for a context *after* that context's willDisappear,
- *    which needs no runtime introspection and so works for native plugins too.
- *
- * The slope is fitted across the kept cycles rather than comparing first to last, so one-time
- * lazy initialisation is not mistaken for a leak.
+ * The check uses three signals:
+ *  - memory growth per cycle after a forced GC;
+ *  - active handles per cycle;
+ *  - commands that the plugin sends for a context after its `willDisappear`.
  */
 export async function checkLifecycle(session: Session, options: LifecycleOptions): Promise<LifecycleReport> {
 	const inspector =
@@ -92,8 +88,7 @@ export async function checkLifecycle(session: Session, options: LifecycleOptions
 	let added: ActionInstance | undefined;
 
 	try {
-		// A leaking action from an earlier check keeps sending frames forever, which would be
-		// read as this action's noise. Report how many others are live so the caller can tell.
+		// Other visible actions add noise, so the report includes their count.
 		const otherLiveActions = session.host.allActions().filter((candidate) => candidate.visible).length;
 
 		const instance = session.host.addAction({ uuid: options.uuid, settings: options.settings, appear: false });
@@ -180,11 +175,7 @@ export async function checkLifecycle(session: Session, options: LifecycleOptions
 	}
 }
 
-/**
- * Waits for the plugin to stop sending frames, and gives up quickly if it never does.
- * An action that leaks a repeating timer never goes quiet, so an unbounded wait here would
- * make every later cycle pay the full timeout. Returns 1 when the wait timed out.
- */
+/** Waits until the plugin is quiet. Returns 1 when the wait times out. */
 async function settle(session: Session, options: LifecycleOptions): Promise<number> {
 	try {
 		await session.host.recorder.waitForQuiet(options.quietMs, options.timeoutMs);
@@ -197,7 +188,7 @@ async function settle(session: Session, options: LifecycleOptions): Promise<numb
 async function sample(session: Session, inspector: InspectorClient | undefined, cycle: number): Promise<Sample> {
 	if (inspector !== undefined) {
 		await inspector.collectGarbage();
-		// A second pass collects anything the first pass made unreachable.
+		// The second pass collects what the first pass released.
 		await inspector.collectGarbage();
 		const memory = await inspector.memoryUsage();
 		return {
@@ -230,7 +221,7 @@ type SlopeFit = {
 	stdError: number;
 };
 
-/** Least-squares slope per cycle, with the standard error needed to tell signal from noise. */
+/** Least-squares slope per cycle, with its standard error. */
 function fitSlope(values: number[]): SlopeFit {
 	const n = values.length;
 	const meanX = (n - 1) / 2;
@@ -346,7 +337,7 @@ function verdictFor(report: LifecycleReport, options: LifecycleOptions): Lifecyc
 	return { ...report, verdict, reasons };
 }
 
-/** What each libuv handle type usually means when it grows once per cycle. */
+/** Likely cause for each handle type that grows per cycle. */
 const HANDLE_HINTS = {
 	Timeout: "a setTimeout/setInterval is never cleared; keep the id and clearInterval it in onWillDisappear",
 	Immediate: "a setImmediate chain keeps rescheduling itself",

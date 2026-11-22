@@ -12,10 +12,7 @@ export type DaemonOptions = {
 	idleTimeoutMs: number;
 };
 
-/**
- * Holds a session open between CLI invocations. Everything runs headless in this detached
- * process so the user's desktop and their installed Stream Deck app are never touched.
- */
+/** Keeps a session open between CLI calls. */
 export class Daemon {
 	readonly #session: Session;
 	readonly #idleTimeoutMs: number;
@@ -110,10 +107,7 @@ export class Daemon {
 		}
 	}
 
-	/**
-	 * Runs `task` after every earlier exclusive request has finished. Requests arrive from
-	 * separate CLI processes, so two that change the session would otherwise interleave.
-	 */
+	/** Runs `task` after all earlier exclusive requests are complete. */
 	async #exclusive(task: () => Promise<JsonValue>): Promise<JsonValue> {
 		const previous = this.#queue;
 		let release = (): void => undefined;
