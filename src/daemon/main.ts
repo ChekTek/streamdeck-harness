@@ -1,4 +1,5 @@
-import { openSync, readFileSync, writeFileSync } from "node:fs";
+import { openSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { parseEnv } from "node:util";
 
 import {
 	errorMessage,
@@ -23,7 +24,9 @@ async function main(): Promise<void> {
 	}
 
 	const startPath = `${sessionDir(name)}/start.json`;
-	const options = parseStartFile(parseJsonValue(readFileSync(startPath, "utf8")), name);
+	const startText = readFileSync(startPath, "utf8");
+	rmSync(startPath, { force: true });
+	const options = parseStartFile(parseJsonValue(startText), name);
 
 	try {
 		const session = await Session.start(options);
@@ -73,8 +76,11 @@ function parseStartFile(value: JsonValue, name: string): SessionOptions & { idle
 	if (isJsonObject(value.globalSettings)) {
 		options.globalSettings = value.globalSettings;
 	}
+	if (isJsonString(value.envFile)) {
+		options.env = parseEnv(readFileSync(value.envFile, "utf8"));
+	}
 	if (isJsonObject(value.env)) {
-		options.env = parsePluginEnv(value.env, "start.json env");
+		options.env = { ...options.env, ...parsePluginEnv(value.env, "start.json env") };
 	}
 	if (Array.isArray(value.devices)) {
 		options.devices = value.devices.filter((entry) => isJsonString(entry));

@@ -106,6 +106,8 @@ export type Scenario = {
 	globalSettings?: JsonObject;
 	/** Environment variables for the plugin process. */
 	env?: NodeJS.ProcessEnv;
+	/** Path of a `.env` file for the plugin process, relative to the scenario file. */
+	dotenv?: string;
 	steps: Step[];
 };
 
@@ -158,6 +160,11 @@ export function parseScenario(value: JsonValue, source: string): Scenario {
 		scenario.env = parsePluginEnv(value.env, `${source} env`);
 	} else if (value.env !== undefined) {
 		throw new Error(`${source} env: expected a mapping`);
+	}
+	if (isJsonString(value.dotenv)) {
+		scenario.dotenv = value.dotenv;
+	} else if (value.dotenv !== undefined) {
+		throw new Error(`${source} dotenv: expected a path`);
 	}
 
 	const device = value.device;

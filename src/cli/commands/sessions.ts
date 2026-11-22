@@ -1,6 +1,6 @@
 import { type ChildProcess, spawn } from "node:child_process";
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { basename, join } from "node:path";
+import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { basename, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
@@ -80,14 +80,21 @@ export type LaunchOptions = {
 	globalSettings?: JsonObject;
 	/** Environment variables for the plugin process. */
 	env?: NodeJS.ProcessEnv;
+	/** Path of a `.env` file for the plugin process. The daemon reads it, so its values are not stored in the session state. */
+	envFile?: string;
 };
 
 /** Starts a daemon for `session` and waits until it is ready. */
 export async function launchSession(session: string, options: LaunchOptions): Promise<Meta> {
 	validateSessionName(session);
 
+	if (options.envFile !== undefined && !existsSync(options.envFile)) {
+		throw new Error(`env file not found: ${options.envFile}`);
+	}
+
 	const directory = sessionDir(session);
-	mkdirSync(directory, { recursive: true });
+	mkdirSync(directory, { recursive: true, mode: 0o700 });
+	chmodSync(directory, 0o700);
 	const lock = acquireStartLock(session);
 
 	try {
@@ -108,8 +115,11 @@ export async function launchSession(session: string, options: LaunchOptions): Pr
 			registerTimeoutMs: options.registerTimeoutMs,
 			globalSettings: options.globalSettings,
 			env: options.env,
+			envFile: options.envFile,
 		};
-		writeFileSync(`${directory}/start.json`, JSON.stringify(start, null, 2));
+		const startPath = join(directory, "start.json");
+		rmSync(startPath, { force: true });
+		writeFileSync(startPath, JSON.stringify(start, null, 2), { mode: 0o600 });
 
 		spawnDaemon(session).unref();
 
@@ -168,7 +178,7 @@ function spawnDaemon(session: string): ChildProcess {
 }
 
 export const START_USAGE =
-	"start <path-to-plugin-or-.sdPlugin> [--global-settings '<json>'] [--env '<json>'] [--device NAMES] [--node PATH] [--no-inspect] [--idle-timeout MIN] [--register-timeout MS] [--start-timeout MS]";
+	"start <path-to-plugin-or-.sdPlugin> [--global-settings '<json>'] [--env '<json>'] [--dotenv PATH] [--device NAMES] [--node PATH] [--no-inspect] [--idle-timeout MIN] [--register-timeout MS] [--start-timeout MS]";
 
 export const CLOSE_USAGE = "close [--all] [--keep-artifacts]";
 
@@ -212,6 +222,11 @@ export async function startCommand(args: Args): Promise<void> {
 		} catch (cause) {
 			fail(errorMessage(cause));
 		}
+	}
+
+	const envFile = flagString(args, "dotenv");
+	if (envFile !== undefined) {
+		options.envFile = resolve(envFile);
 	}
 
 	let meta: Meta;

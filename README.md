@@ -64,6 +64,13 @@ sdtest -s=demo start path/to/plugin --global-settings '{"apiKey":"test"}' --env 
   gets them when it sends `getGlobalSettings`.
 - `--env` sets environment variables for the plugin process. The plugin also gets the
   environment of the shell that ran `start`.
+- `--dotenv` reads environment variables from a `.env` file. A value from `--env` wins.
+
+Keep secrets out of the command line. Put secret environment variables in a `.env` file that
+git ignores and pass it with `--dotenv`. The session state then holds only the path of the
+file. For secret settings, `--global-settings @secrets.json` reads the JSON from a file. The
+session state holds a copy of the values of `--global-settings` and `--env` only until the
+daemon has read them. Only the owner can read the session state.
 
 ## Property inspector
 
@@ -124,8 +131,8 @@ sdtest run examples/lifecycle-fixture.yaml
 
 See [examples](examples) for the steps and assertions.
 
-The top-level keys `globalSettings` and `env` do the same as `--global-settings` and `--env` of
-`start`. To change global settings while the plugin runs, use a `setGlobalSettings` step.
+The top-level keys `globalSettings`, `env` and `dotenv` do the same as `--global-settings`,
+`--env` and `--dotenv` of `start`. The path in `dotenv` is relative to the scenario file. To change global settings while the plugin runs, use a `setGlobalSettings` step.
 
 ## Mock host
 

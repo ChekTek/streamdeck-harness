@@ -36,6 +36,7 @@ export async function runCommand(args: Args): Promise<void> {
 		nodePath: scenario.node,
 		globalSettings: scenario.globalSettings,
 		env: scenario.env,
+		envFile: scenario.dotenv === undefined ? undefined : resolvePath(scenario.dotenv, base),
 	};
 	const meta = await launchSession(session, launch).catch((cause: unknown) => {
 		fail(errorMessage(cause));
