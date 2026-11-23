@@ -14,10 +14,11 @@ import {
 	parseJsonValue,
 } from "../host/protocol.js";
 import type { Direction, EntryFilter } from "../host/recorder.js";
-import { Inspector } from "../pi/inspector.js";
+import { type FieldState, HIDDEN_VALUE, Inspector } from "../pi/inspector.js";
 import { readPluginLogs } from "../plugin/logs.js";
 import { getBrowser } from "../render/chromium.js";
 import { keyHtml, resolveKeyImage } from "../render/key.js";
+import { redactJson, type Secret } from "./redact.js";
 import type { Session } from "./session.js";
 
 export type MethodContext = {
@@ -101,6 +102,20 @@ function requireInspector(session: Session): Inspector {
 		throw new Error("no property inspector is open. Open one first: sdtest pi-open <ref>");
 	}
 	return session.propertyInspector;
+}
+
+/**
+ * The reply to a field change: the field and the settings after the change. The settings do
+ * not show the value of a password field.
+ */
+function fieldReply(session: Session, inspector: Inspector, applied: FieldState): JsonObject {
+	const hidden: Secret[] = applied.secret === undefined ? [] : [{ value: applied.secret, label: HIDDEN_VALUE }];
+	return compactJson({
+		setting: applied.setting,
+		value: applied.value,
+		settings: redactJson(session.host.settings.get(inspector.context), hidden),
+		globalSettings: redactJson(session.host.settings.getGlobal(), hidden),
+	});
 }
 
 function describeInstance(session: Session, instance: ActionInstance): JsonObject {
@@ -379,12 +394,7 @@ export const methods = {
 		const inspector = requireInspector(session);
 		const applied = await inspector.setField(requireStr(params, "setting"), params.value ?? null);
 		await new Promise((done) => setTimeout(done, num(params, "settleMs") ?? 300));
-		return compactJson({
-			setting: applied.setting,
-			value: applied.value,
-			settings: session.host.settings.get(inspector.context),
-			globalSettings: session.host.settings.getGlobal(),
-		});
+		return fieldReply(session, inspector, applied);
 	},
 
 	async piType({ session }: MethodContext, params: JsonObject): Promise<JsonValue> {
@@ -395,12 +405,7 @@ export const methods = {
 			blur: bool(params, "blur"),
 		});
 		await new Promise((done) => setTimeout(done, num(params, "settleMs") ?? 300));
-		return compactJson({
-			setting: applied.setting,
-			value: applied.value,
-			settings: session.host.settings.get(inspector.context),
-			globalSettings: session.host.settings.getGlobal(),
-		});
+		return fieldReply(session, inspector, applied);
 	},
 
 	async piClick({ session }: MethodContext, params: JsonObject): Promise<JsonValue> {
