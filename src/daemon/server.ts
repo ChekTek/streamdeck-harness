@@ -4,18 +4,22 @@ import { createServer, type Server, type Socket } from "node:net";
 import { compactJson, errorMessage, type JsonValue } from "../host/protocol.js";
 import { isConcurrent, type MethodContext, methodFor } from "./methods.js";
 import { metaPath, socketPath } from "./paths.js";
+import { redactJson, redactText, type Secret } from "./redact.js";
 import { parseRpcRequest, readFrames, writeFrame } from "./rpc.js";
 import type { Session } from "./session.js";
 
 export type DaemonOptions = {
 	session: Session;
 	idleTimeoutMs: number;
+	/** Values that are replaced by their label in each reply. */
+	secrets?: Secret[];
 };
 
 /** Keeps a session open between CLI calls. */
 export class Daemon {
 	readonly #session: Session;
 	readonly #idleTimeoutMs: number;
+	readonly #secrets: Secret[];
 	readonly #address: string;
 	#server: Server | undefined;
 	readonly #connections = new Set<Socket>();
@@ -28,6 +32,7 @@ export class Daemon {
 	constructor(options: DaemonOptions) {
 		this.#session = options.session;
 		this.#idleTimeoutMs = options.idleTimeoutMs;
+		this.#secrets = options.secrets ?? [];
 		this.#address = socketPath(options.session.name);
 	}
 
@@ -94,11 +99,11 @@ export class Daemon {
 		this.#inFlight++;
 		try {
 			const result = await (isConcurrent(request.method) ? run() : this.#exclusive(run));
-			writeFrame(socket, compactJson({ id: request.id, ok: true, result }));
+			writeFrame(socket, compactJson({ id: request.id, ok: true, result: redactJson(result, this.#secrets) }));
 		} catch (cause) {
-			const error = compactJson({ message: errorMessage(cause) });
+			const error = compactJson({ message: redactText(errorMessage(cause), this.#secrets) });
 			if (cause instanceof Error && cause.stack !== undefined) {
-				error.stack = cause.stack;
+				error.stack = redactText(cause.stack, this.#secrets);
 			}
 			writeFrame(socket, compactJson({ id: request.id, ok: false, error }));
 		} finally {

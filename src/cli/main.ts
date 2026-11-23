@@ -371,15 +371,16 @@ const REMOTE = {
 	},
 	"pi-fields": {
 		method: "piFields",
-		summary: "List the property inspector's settings-bound components and their values.",
+		summary: "List the property inspector's settings-bound components and their values. A password value shows as <hidden>.",
 		usage: "pi-fields",
 		params: (): JsonObject => ({}),
 		human: (fields: JsonValue): string => fieldsTable(jsonArray(fields), ["SETTING", "TAG", "VALUE", "SCOPE", "VISIBLE"]),
 	},
 	"pi-set": {
 		method: "piSet",
-		summary: "Assign a property inspector field and dispatch input and change. No key events: see pi-type.",
-		usage: "pi-set <setting> <value> [--raw] [--settle MS]",
+		summary:
+			"Assign a property inspector field and dispatch input and change. No key events: see pi-type. The prefix css= selects a field that has no setting.",
+		usage: "pi-set <setting-or-css=selector> <value> [--raw] [--settle MS]",
 		params: (args: Args): JsonObject =>
 			compactJson({
 				setting: args.positional[0],
@@ -390,8 +391,9 @@ const REMOTE = {
 	},
 	"pi-type": {
 		method: "piType",
-		summary: "Type into a property inspector text field with real key events, to test input filters.",
-		usage: "pi-type <setting> <text> [--no-clear] [--paste] [--blur] [--settle MS]",
+		summary:
+			"Type into a property inspector text field with real key events, to test input filters. The prefix css= selects a field that has no setting.",
+		usage: "pi-type <setting-or-css=selector> <text> [--no-clear] [--paste] [--blur] [--settle MS]",
 		params: (args: Args): JsonObject =>
 			compactJson({
 				setting: args.positional[0],

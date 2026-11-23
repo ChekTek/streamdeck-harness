@@ -1,5 +1,5 @@
 import { join } from "node:path";
-import type { Locator, Page } from "playwright";
+import type { ElementHandle, Locator, Page } from "playwright";
 
 import type { ActionInstance } from "../host/action.js";
 import {
@@ -56,6 +56,19 @@ const READY_POLL_MS = 10;
 /** Target prefixes that select the kind of match. */
 const CSS_PREFIX = "css=";
 const TEXT_PREFIX = "text=";
+
+/** Shown as the value of a password field that has a value. */
+export const HIDDEN_VALUE = "<hidden>";
+
+/** The state of a field after a change. */
+export type FieldState = {
+	/** The field as the caller named it: a setting, or `css=` and a CSS selector. */
+	setting: string;
+	/** The value of the field. For a password field that has a value, this is `HIDDEN_VALUE`. */
+	value: boolean | number | string | null;
+	/** The values of a password field before and after the change, longest first. Do not put them in output. */
+	secrets?: string[];
+};
 
 /** A headless property inspector. Only one is open at a time. */
 export class Inspector {
@@ -146,26 +159,39 @@ export class Inspector {
 		await this.#server.close();
 	}
 
-	/** Lists the SDPI components that have a `setting` attribute, with their values. */
+	/**
+	 * Lists the SDPI components that have a `setting` attribute, with their values. The value of
+	 * a password field is `HIDDEN_VALUE` when the field has a value.
+	 */
 	public async fields(): Promise<JsonObject[]> {
-		const rows = await this.#page.evaluate(() => {
-			type SdpiHost = HTMLElement & { disabled?: boolean; value?: boolean | number | string | null };
+		const rows = await this.#page.evaluate((hidden) => {
+			type SdpiHost = HTMLElement & {
+				disabled?: boolean;
+				focusElement?: HTMLElement | { value?: HTMLElement };
+				value?: boolean | number | string | null;
+			};
 			return [...document.querySelectorAll("[setting]")].map((element) => {
 				const item = element.closest("sdpi-item");
-				// SAFETY: SDPI elements have `value` and `disabled`. lib.dom does not declare them.
+				// SAFETY: SDPI elements have `value`, `disabled` and `focusElement`. lib.dom does not declare them.
 				const host = element as SdpiHost;
+				const ref = host.focusElement;
+				const inner = ref instanceof HTMLElement ? ref : (ref?.value ?? element);
+				const secret =
+					element.localName === "sdpi-password" || (inner instanceof HTMLInputElement && inner.type === "password");
+				const value = host.value ?? null;
 				return {
 					setting: element.getAttribute("setting"),
 					tag: element.tagName.toLowerCase(),
 					label: item?.getAttribute("label") ?? null,
 					title: item?.getAttribute("title") ?? null,
 					global: element.getAttribute("global") === "true" || element.hasAttribute("global"),
-					value: host.value ?? null,
+					value: secret && value !== null && value !== "" ? hidden : value,
+					secret,
 					visible: host.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true }),
 					disabled: host.disabled ?? false,
 				};
 			});
-		});
+		}, HIDDEN_VALUE);
 		return rows.map((row) =>
 			compactJson({
 				setting: row.setting,
@@ -174,6 +200,7 @@ export class Inspector {
 				title: row.title,
 				global: row.global,
 				value: row.value,
+				secret: row.secret ? true : undefined,
 				visible: row.visible,
 				disabled: row.disabled,
 			}),
@@ -187,12 +214,13 @@ export class Inspector {
 	}
 
 	/**
-	 * Sets an SDPI component by its `setting` attribute. It assigns the value of the inner
-	 * control and dispatches `input` and `change`. No key events fire.
+	 * Sets a field. It assigns the value of the inner control and dispatches `input` and
+	 * `change`. No key events fire. See `fieldQuery` for the form of `setting`.
 	 */
-	public async setField(setting: string, value: JsonValue): Promise<JsonObject> {
-		const result = await this.#page.evaluate(
-			async ({ setting: name, value: next }: PiFieldArg) => {
+	public async setField(setting: string, value: JsonValue): Promise<FieldState> {
+		const field = await this.#field(fieldQuery(setting));
+		try {
+			const result = await field.evaluate(async (node, next: PiFieldValue) => {
 				type SdpiHost = HTMLElement & {
 					disabled?: boolean;
 					focusElement?: HTMLElement | { value?: HTMLElement };
@@ -200,21 +228,20 @@ export class Inspector {
 					value?: boolean | number | string | null;
 				};
 
-				const node = document.querySelector(`[setting="${name}"]`);
-				if (node === null) {
-					const known = [...document.querySelectorAll("[setting]")].map((candidate) => candidate.getAttribute("setting"));
-					return {
-						ok: false as const,
-						error: `no component with setting="${name}". Present: ${known.join(", ") || "(none)"}`,
-					};
-				}
-
 				// SAFETY: SDPI elements have value, focusElement and updateComplete.
 				const element = node as SdpiHost;
 				await element.updateComplete?.catch(() => undefined);
 
 				const ref = element.focusElement;
-				const inner = ref instanceof HTMLElement ? ref : (ref?.value ?? undefined);
+				const control = ref instanceof HTMLElement ? ref : (ref?.value ?? undefined);
+				const isControl =
+					element instanceof HTMLInputElement ||
+					element instanceof HTMLSelectElement ||
+					element instanceof HTMLTextAreaElement;
+				const inner = control ?? (isControl ? element : undefined);
+
+				const secret = inner instanceof HTMLInputElement && inner.type === "password";
+				const previous = secret ? inner.value : "";
 
 				if (inner instanceof HTMLInputElement && (inner.type === "checkbox" || inner.type === "radio")) {
 					inner.checked = Boolean(next);
@@ -237,18 +264,23 @@ export class Inspector {
 					target?.dispatchEvent(new Event("change", { bubbles: true }));
 				};
 				fire(inner);
-				fire(element);
+				if (inner !== element) {
+					fire(element);
+				}
 
 				await element.updateComplete?.catch(() => undefined);
-				return { ok: true as const, value: element.value ?? null };
-			},
-			{ setting, value: toPiFieldValue(value) },
-		);
-
-		if (!result.ok) {
-			throw new Error(result.error);
+				const toggle =
+					element instanceof HTMLInputElement && (element.type === "checkbox" || element.type === "radio");
+				return {
+					value: toggle ? element.checked : (element.value ?? null),
+					secret,
+					previous,
+				};
+			}, toPiFieldValue(value));
+			return fieldState(setting, result.value, result.secret, result.previous);
+		} finally {
+			await field.dispose();
 		}
-		return compactJson({ setting, value: result.value });
 	}
 
 	public async snapshot(): Promise<string> {
@@ -256,101 +288,18 @@ export class Inspector {
 	}
 
 	/**
-	 * Types into the text field of an SDPI component with real keyboard input on a US keyboard
-	 * layout. Each character sends `keydown`, `keypress`, `beforeinput`, `input` and `keyup`. Shift
+	 * Types into a text field with real keyboard input on a US keyboard layout. See `fieldQuery`
+	 * for the form of `setting`. Each character sends `keydown`, `keypress`, `beforeinput`, `input` and `keyup`. Shift
 	 * is held for a character that needs it. A character that has no key on a US keyboard sends
 	 * only `beforeinput` and `input`.
 	 */
-	public async typeField(setting: string, text: string, options: TypeOptions = {}): Promise<JsonObject> {
-		const focused = await this.#page.evaluate(
-			async ({ setting: name, clear }: PiTypeArg) => {
-				type SdpiHost = HTMLElement & {
-					focusElement?: HTMLElement | { value?: HTMLElement };
-					updateComplete?: Promise<boolean>;
-				};
-
-				const node = document.querySelector(`[setting="${name}"]`);
-				if (node === null) {
-					const known = [...document.querySelectorAll("[setting]")].map((candidate) => candidate.getAttribute("setting"));
-					return {
-						ok: false as const,
-						error: `no component with setting="${name}". Present: ${known.join(", ") || "(none)"}`,
-					};
-				}
-
-				// SAFETY: SDPI elements have focusElement and updateComplete.
-				const element = node as SdpiHost;
-				await element.updateComplete?.catch(() => undefined);
-
-				const ref = element.focusElement;
-				const inner = ref instanceof HTMLElement ? ref : (ref?.value ?? undefined);
-				const isTextField =
-					inner instanceof HTMLTextAreaElement ||
-					(inner instanceof HTMLInputElement && ["text", "search", "url", "tel", "password"].includes(inner.type));
-				if (!isTextField) {
-					return { ok: false as const, error: `"${name}" is not a text field. Use pi-set for it.` };
-				}
-
-				if (!element.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true })) {
-					return { ok: false as const, error: `"${name}" is hidden.` };
-				}
-
-				inner.focus();
-				if (!inner.matches(":focus")) {
-					return { ok: false as const, error: `"${name}" cannot take focus. It is hidden or disabled.` };
-				}
-				inner.setSelectionRange(clear ? 0 : inner.value.length, inner.value.length);
-				return { ok: true as const, hasValue: inner.value !== "" };
-			},
-			{ setting, clear: options.clear ?? true },
-		);
-		if (!focused.ok) {
-			throw new Error(focused.error);
+	public async typeField(setting: string, text: string, options: TypeOptions = {}): Promise<FieldState> {
+		const field = await this.#field(fieldQuery(setting));
+		try {
+			return await this.#typeInto(field, setting, text, options);
+		} finally {
+			await field.dispose();
 		}
-
-		const keyboard = this.#page.keyboard;
-		if ((options.clear ?? true) && focused.hasValue) {
-			await keyboard.press("Backspace");
-		}
-		if (options.paste === true) {
-			await this.#paste(text);
-		} else {
-			for (const character of text) {
-				if (US_SHIFT_CHARACTERS.includes(character)) {
-					await keyboard.down("Shift");
-					await keyboard.press(character);
-					await keyboard.up("Shift");
-				} else {
-					await keyboard.type(character);
-				}
-			}
-		}
-
-		const value = await this.#page.evaluate(
-			async ({ setting: name, blur }: PiBlurArg) => {
-				type SdpiHost = HTMLElement & {
-					updateComplete?: Promise<boolean>;
-					value?: boolean | number | string | null;
-				};
-
-				if (blur) {
-					let active = document.activeElement;
-					while (active?.shadowRoot?.activeElement) {
-						active = active.shadowRoot.activeElement;
-					}
-					if (active instanceof HTMLElement) {
-						active.blur();
-					}
-				}
-
-				// SAFETY: SDPI elements have value and updateComplete.
-				const element = document.querySelector(`[setting="${name}"]`) as SdpiHost | null;
-				await element?.updateComplete?.catch(() => undefined);
-				return element?.value ?? null;
-			},
-			{ setting, blur: options.blur ?? false },
-		);
-		return compactJson({ setting, value });
 	}
 
 	/** Tells if the first element that matches `target` exists and is shown. See `#locate` for the form of `target`. */
@@ -411,6 +360,24 @@ export class Inspector {
 	}
 
 	/**
+	 * The first element that matches `query`. As in `#locate`, the element can be in an open
+	 * shadow root. Dispose the handle after use.
+	 */
+	async #field(query: FieldQuery): Promise<FieldHandle> {
+		const locator = this.#page.locator(query.selector).first();
+		if ((await locator.count()) > 0) {
+			return locator.elementHandle({ timeout: 5000 });
+		}
+		if (!query.bySetting) {
+			throw new Error(`no element matches the CSS selector "${query.selector}"`);
+		}
+		const known = await this.#page
+			.locator("[setting]")
+			.evaluateAll((elements) => elements.map((element) => element.getAttribute("setting")));
+		throw new Error(`no component with setting="${query.name}". Present: ${known.join(", ") || "(none)"}`);
+	}
+
+	/**
 	 * The first element that matches `target`. The prefix `css=` makes it a CSS selector and
 	 * `text=` makes it text in the page. Without a prefix, a target that starts with `#` or `.`,
 	 * or that contains `[`, is a CSS selector. Each other target is text.
@@ -463,6 +430,96 @@ export class Inspector {
 				visible: document.body?.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true }) ?? false,
 			};
 		}, budgetMs);
+	}
+
+	/** Types `text` into `field`. `name` is the field as the caller named it. */
+	async #typeInto(field: FieldHandle, name: string, text: string, options: TypeOptions): Promise<FieldState> {
+		const focused = await field.evaluate(
+			async (node, { name: fieldName, clear }: PiTypeArg) => {
+				type SdpiHost = HTMLElement & {
+					focusElement?: HTMLElement | { value?: HTMLElement };
+					updateComplete?: Promise<boolean>;
+				};
+
+				// SAFETY: SDPI elements have focusElement and updateComplete.
+				const element = node as SdpiHost;
+				await element.updateComplete?.catch(() => undefined);
+
+				const ref = element.focusElement;
+				const control = ref instanceof HTMLElement ? ref : (ref?.value ?? undefined);
+				const inner =
+					control ??
+					(element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement ? element : undefined);
+				const isTextField =
+					inner instanceof HTMLTextAreaElement ||
+					(inner instanceof HTMLInputElement && ["text", "search", "url", "tel", "password"].includes(inner.type));
+				if (!isTextField) {
+					return { ok: false as const, error: `"${fieldName}" is not a text field. Use pi-set for it.` };
+				}
+
+				if (!element.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true })) {
+					return { ok: false as const, error: `"${fieldName}" is hidden.` };
+				}
+
+				inner.focus();
+				if (!inner.matches(":focus")) {
+					return { ok: false as const, error: `"${fieldName}" cannot take focus. It is hidden or disabled.` };
+				}
+				inner.setSelectionRange(clear ? 0 : inner.value.length, inner.value.length);
+				const secret = inner instanceof HTMLInputElement && inner.type === "password";
+				return {
+					ok: true as const,
+					hasValue: inner.value !== "",
+					secret,
+					previous: secret ? inner.value : "",
+				};
+			},
+			{ name, clear: options.clear ?? true },
+		);
+		if (!focused.ok) {
+			throw new Error(focused.error);
+		}
+
+		const keyboard = this.#page.keyboard;
+		if ((options.clear ?? true) && focused.hasValue) {
+			await keyboard.press("Backspace");
+		}
+		if (options.paste === true) {
+			await this.#paste(text);
+		} else {
+			for (const character of text) {
+				if (US_SHIFT_CHARACTERS.includes(character)) {
+					await keyboard.down("Shift");
+					await keyboard.press(character);
+					await keyboard.up("Shift");
+				} else {
+					await keyboard.type(character);
+				}
+			}
+		}
+
+		const value = await field.evaluate(async (node, blur: boolean) => {
+			type SdpiHost = HTMLElement & {
+				updateComplete?: Promise<boolean>;
+				value?: boolean | number | string | null;
+			};
+
+			if (blur) {
+				let active = document.activeElement;
+				while (active?.shadowRoot?.activeElement) {
+					active = active.shadowRoot.activeElement;
+				}
+				if (active instanceof HTMLElement) {
+					active.blur();
+				}
+			}
+
+			// SAFETY: SDPI elements have value and updateComplete.
+			const element = node as SdpiHost;
+			await element.updateComplete?.catch(() => undefined);
+			return element.value ?? null;
+		}, options.blur ?? false);
+		return fieldState(name, value, focused.secret, focused.previous);
 	}
 }
 
@@ -563,22 +620,58 @@ type PageReadiness = {
 	visible: boolean;
 };
 
-type PiFieldArg = {
-	setting: string;
-	value: boolean | number | string | null;
+/** Where a field is in the page. */
+type FieldQuery = {
+	/** The field as the caller named it. */
+	name: string;
+	selector: string;
+	/** True when the caller gave a setting and not a CSS selector. */
+	bySetting: boolean;
 };
 
+type FieldHandle = ElementHandle<HTMLElement | SVGElement>;
+
+type PiFieldValue = boolean | number | string | null;
+
 type PiTypeArg = {
-	setting: string;
+	/** The field as the caller named it. */
+	name: string;
 	clear: boolean;
 };
 
-type PiBlurArg = {
-	setting: string;
-	blur: boolean;
-};
+/**
+ * Finds a field. A target is the `setting` attribute of an SDPI component. With the prefix
+ * `css=`, it is a CSS selector for an SDPI component or for an `input`, `select` or `textarea`
+ * that has no `setting` attribute.
+ */
+function fieldQuery(target: string): FieldQuery {
+	if (target.startsWith(CSS_PREFIX)) {
+		return { name: target, selector: target.slice(CSS_PREFIX.length), bySetting: false };
+	}
+	return { name: target, selector: `[setting="${target}"]`, bySetting: true };
+}
 
-function toPiFieldValue(value: JsonValue): boolean | number | string | null {
+/**
+ * Builds the state of a field. The value of a password field goes to `secrets` and not to
+ * `value`. `previous` is the value of the password field before the change.
+ */
+function fieldState(
+	setting: string,
+	value: boolean | number | string | null,
+	secret: boolean,
+	previous: string,
+): FieldState {
+	if (!secret) {
+		return { setting, value };
+	}
+	const hasValue = value !== null && value !== "";
+	const secrets = [previous, hasValue ? String(value) : ""]
+		.filter((entry) => entry !== "")
+		.sort((first, second) => second.length - first.length);
+	return { setting, value: hasValue ? HIDDEN_VALUE : value, secrets };
+}
+
+function toPiFieldValue(value: JsonValue): PiFieldValue {
 	if (value === null || value === true || value === false) {
 		return value;
 	}

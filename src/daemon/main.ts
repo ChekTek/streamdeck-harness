@@ -12,6 +12,7 @@ import {
 } from "../host/protocol.js";
 import { parsePluginEnv } from "../plugin/launch.js";
 import { daemonLogPath, metaPath, sessionDir, socketPath } from "./paths.js";
+import { redactText, type Secret, secretsFromEnv } from "./redact.js";
 import { Daemon } from "./server.js";
 import { Session, type SessionOptions } from "./session.js";
 
@@ -23,14 +24,20 @@ async function main(): Promise<void> {
 		process.exit(2);
 	}
 
+	let secrets: Secret[] = [];
 	try {
 		const startPath = `${sessionDir(name)}/start.json`;
 		const startText = readFileSync(startPath, "utf8");
 		rmSync(startPath, { force: true });
 		const options = parseStartFile(parseJsonValue(startText), name);
+		secrets = options.secrets ?? [];
 
 		const session = await Session.start(options);
-		const daemon = new Daemon({ session, idleTimeoutMs: options.idleTimeoutMs ?? 15 * 60_000 });
+		const daemon = new Daemon({
+			session,
+			idleTimeoutMs: options.idleTimeoutMs ?? 15 * 60_000,
+			secrets,
+		});
 		await daemon.listen();
 
 		writeFileSync(
@@ -49,18 +56,29 @@ async function main(): Promise<void> {
 	} catch (cause) {
 		writeFileSync(
 			metaPath(name),
-			JSON.stringify({ status: "failed", error: errorMessage(cause), at: new Date().toISOString() }, null, 2),
+			JSON.stringify(
+				{ status: "failed", error: redactText(errorMessage(cause), secrets), at: new Date().toISOString() },
+				null,
+				2,
+			),
 		);
-		process.stderr.write(`${cause instanceof Error ? (cause.stack ?? cause.message) : errorMessage(cause)}\n`);
+		const detail = cause instanceof Error ? (cause.stack ?? cause.message) : errorMessage(cause);
+		process.stderr.write(`${redactText(detail, secrets)}\n`);
 		process.exit(1);
 	}
 }
 
-function parseStartFile(value: JsonValue, name: string): SessionOptions & { idleTimeoutMs?: number } {
+type StartOptions = SessionOptions & {
+	idleTimeoutMs?: number;
+	/** The variables of the env file. Output does not show their values. */
+	secrets?: Secret[];
+};
+
+function parseStartFile(value: JsonValue, name: string): StartOptions {
 	if (!isJsonObject(value) || !isJsonString(value.pluginPath)) {
 		throw new Error("start.json is missing pluginPath");
 	}
-	const options: SessionOptions & { idleTimeoutMs?: number } = { name, pluginPath: value.pluginPath };
+	const options: StartOptions = { name, pluginPath: value.pluginPath };
 	if (isJsonString(value.nodePath)) {
 		options.nodePath = value.nodePath;
 	}
@@ -79,6 +97,7 @@ function parseStartFile(value: JsonValue, name: string): SessionOptions & { idle
 	if (isJsonString(value.envFile)) {
 		try {
 			options.env = parseEnv(readFileSync(value.envFile, "utf8"));
+			options.secrets = secretsFromEnv(options.env);
 		} catch (cause) {
 			throw new Error(`could not read the env file ${value.envFile}: ${errorMessage(cause)}`, { cause });
 		}

@@ -72,6 +72,11 @@ file. For secret settings, `--global-settings @secrets.json` reads the JSON from
 session state holds a copy of the values of `--global-settings` and `--env` only until the
 daemon has read them. Only the owner can read the session state.
 
+The output of each command hides the values from the `--dotenv` file. A value shows as the
+name of its variable, such as `<API_KEY>`. This also applies when the same value is in a
+setting, an event, a log line or the error of a failed start. A value of fewer than 8
+characters is not hidden.
+
 ## Property inspector
 
 ```bash
@@ -109,6 +114,13 @@ change its limit, or `wait: false` to check only the connection.
   starts with `#` or `.`, or that contains `[`, is a CSS selector. Each other target is text.
 - `pi-set` assigns the value of a field and dispatches `input` and `change`. It sends no key
   events.
+- `pi-set` and `pi-type` find a field by its `setting` attribute. For a field that has no
+  `setting` attribute, such as a search box, use the prefix `css=` and a CSS selector
+  (`pi-type css=#gameSearch balatro`). The selector can match an SDPI component or an `input`,
+  `select` or `textarea`.
+- `pi-fields`, `pi-set` and `pi-type` show the value of a password field as `<hidden>`. The
+  settings in the reply of `pi-set` and `pi-type` do not show that value, nor the value that
+  the field had before the change.
 - `pi-type` types into a text field with real keyboard input. Use it to test input filters
   (`beforeinput`, key handlers). Each character sends `keydown`, `keypress`, `beforeinput`,
   `input` and `keyup`.
@@ -137,6 +149,9 @@ See [examples](examples) for the steps and assertions.
 
 The top-level keys `globalSettings`, `env` and `dotenv` do the same as `--global-settings`,
 `--env` and `--dotenv` of `start`. The path in `dotenv` is relative to the scenario file. To change global settings while the plugin runs, use a `setGlobalSettings` step.
+
+An expected `title`, `settingsContain` or `globalSettingsContain` can hold a value from the
+`dotenv` file. The comparison and the report hide that value in the same way as the output.
 
 ## Mock host
 
