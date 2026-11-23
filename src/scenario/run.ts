@@ -19,7 +19,8 @@ type Aliases = Map<string, string>;
 /**
  * Runs a scenario in an open session and returns a report for each step. A failed assertion
  * does not stop the run. `secrets` are the values that the session hides in its replies. An
- * expected value is compared, and reported, with the same values hidden.
+ * expected value is compared with the same values hidden, and the names and failures of the
+ * report do not show them.
  */
 export async function runScenario(
 	client: DaemonClient,
@@ -32,7 +33,8 @@ export async function runScenario(
 	const artifacts: string[] = [];
 
 	for (const [index, step] of scenario.steps.entries()) {
-		const result: StepResult = { index, name: step.name ?? describeStep(step), ok: true, failures: [] };
+		const name = redactText(step.name ?? describeStep(step), secrets);
+		const result: StepResult = { index, name, ok: true, failures: [] };
 
 		try {
 			result.result = await runStep(client, step, aliases, artifacts, baseDir);
@@ -43,6 +45,7 @@ export async function runScenario(
 			result.failures.push(errorMessage(cause));
 		}
 
+		result.failures = result.failures.map((failure) => redactText(failure, secrets));
 		result.ok = result.failures.length === 0;
 		steps.push(result);
 	}
@@ -51,7 +54,7 @@ export async function runScenario(
 		step.failures.map((failure) => `step ${step.index} (${step.name}): ${failure}`),
 	);
 	return {
-		name: scenario.name ?? "scenario",
+		name: redactText(scenario.name ?? "scenario", secrets),
 		plugin: scenario.plugin,
 		ok: failures.length === 0,
 		steps,
