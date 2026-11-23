@@ -1,7 +1,9 @@
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
+import { parseEnv } from "node:util";
 import { parse as parseYaml } from "yaml";
 
+import { secretsFromEnv } from "../../daemon/redact.js";
 import { errorMessage, parseJsonValue, type JsonValue } from "../../host/protocol.js";
 import { resolvePath, runScenario } from "../../scenario/run.js";
 import { parseScenario, type ScenarioReport } from "../../scenario/schema.js";
@@ -49,7 +51,9 @@ export async function runCommand(args: Args): Promise<void> {
 	let report: ScenarioReport;
 	const client = await DaemonClient.connect(session);
 	try {
-		report = await runScenario(client, { ...scenario, plugin: pluginPath }, base);
+		const secrets =
+			launch.envFile === undefined ? [] : secretsFromEnv(parseEnv(readFileSync(launch.envFile, "utf8")));
+		report = await runScenario(client, { ...scenario, plugin: pluginPath }, base, secrets);
 	} finally {
 		client.close();
 		if (!keep) {

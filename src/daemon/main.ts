@@ -12,7 +12,7 @@ import {
 } from "../host/protocol.js";
 import { parsePluginEnv } from "../plugin/launch.js";
 import { daemonLogPath, metaPath, sessionDir, socketPath } from "./paths.js";
-import { type Secret, secretsFromEnv } from "./redact.js";
+import { redactText, type Secret, secretsFromEnv } from "./redact.js";
 import { Daemon } from "./server.js";
 import { Session, type SessionOptions } from "./session.js";
 
@@ -24,17 +24,19 @@ async function main(): Promise<void> {
 		process.exit(2);
 	}
 
+	let secrets: Secret[] = [];
 	try {
 		const startPath = `${sessionDir(name)}/start.json`;
 		const startText = readFileSync(startPath, "utf8");
 		rmSync(startPath, { force: true });
 		const options = parseStartFile(parseJsonValue(startText), name);
+		secrets = options.secrets ?? [];
 
 		const session = await Session.start(options);
 		const daemon = new Daemon({
 			session,
 			idleTimeoutMs: options.idleTimeoutMs ?? 15 * 60_000,
-			secrets: options.secrets,
+			secrets,
 		});
 		await daemon.listen();
 
@@ -54,9 +56,14 @@ async function main(): Promise<void> {
 	} catch (cause) {
 		writeFileSync(
 			metaPath(name),
-			JSON.stringify({ status: "failed", error: errorMessage(cause), at: new Date().toISOString() }, null, 2),
+			JSON.stringify(
+				{ status: "failed", error: redactText(errorMessage(cause), secrets), at: new Date().toISOString() },
+				null,
+				2,
+			),
 		);
-		process.stderr.write(`${cause instanceof Error ? (cause.stack ?? cause.message) : errorMessage(cause)}\n`);
+		const detail = cause instanceof Error ? (cause.stack ?? cause.message) : errorMessage(cause);
+		process.stderr.write(`${redactText(detail, secrets)}\n`);
 		process.exit(1);
 	}
 }

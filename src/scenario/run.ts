@@ -2,6 +2,7 @@ import { isAbsolute, resolve } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 
 import type { DaemonClient } from "../cli/client.js";
+import { redactJson, redactText, type Secret } from "../daemon/redact.js";
 import {
 	compactJson,
 	errorMessage,
@@ -17,12 +18,14 @@ type Aliases = Map<string, string>;
 
 /**
  * Runs a scenario in an open session and returns a report for each step. A failed assertion
- * does not stop the run.
+ * does not stop the run. `secrets` are the values that the session hides in its replies. An
+ * expected value is compared, and reported, with the same values hidden.
  */
 export async function runScenario(
 	client: DaemonClient,
 	scenario: Scenario,
 	baseDir = process.cwd(),
+	secrets: readonly Secret[] = [],
 ): Promise<ScenarioReport> {
 	const aliases: Aliases = new Map();
 	const steps: StepResult[] = [];
@@ -34,7 +37,7 @@ export async function runScenario(
 		try {
 			result.result = await runStep(client, step, aliases, artifacts, baseDir);
 			if (step.expect !== undefined) {
-				result.failures.push(...(await assertExpectation(client, step.expect, aliases)));
+				result.failures.push(...(await assertExpectation(client, step.expect, aliases, secrets)));
 			}
 		} catch (cause) {
 			result.failures.push(errorMessage(cause));
@@ -283,7 +286,12 @@ async function expectVisibility(client: DaemonClient, target: string, wanted: bo
 	return state;
 }
 
-async function assertExpectation(client: DaemonClient, expectation: Expectation, aliases: Aliases): Promise<string[]> {
+async function assertExpectation(
+	client: DaemonClient,
+	expectation: Expectation,
+	aliases: Aliases,
+	secrets: readonly Secret[],
+): Promise<string[]> {
 	const failures: string[] = [];
 
 	if (expectation.key !== undefined) {
@@ -293,10 +301,11 @@ async function assertExpectation(client: DaemonClient, expectation: Expectation,
 			expectation.state === undefined || key.state === expectation.state,
 			`state is ${String(key.state)}, expected ${String(expectation.state)}`,
 		);
+		const title = expectation.title === undefined ? undefined : redactText(expectation.title, secrets);
 		check(
 			failures,
-			expectation.title === undefined || key.title === expectation.title,
-			`title is ${JSON.stringify(key.title)}, expected ${JSON.stringify(expectation.title)}`,
+			title === undefined || key.title === title,
+			`title is ${JSON.stringify(key.title)}, expected ${JSON.stringify(title)}`,
 		);
 		check(
 			failures,
@@ -321,12 +330,12 @@ async function assertExpectation(client: DaemonClient, expectation: Expectation,
 			"getSettings",
 			compactJson({ ref: resolveAlias(aliases, expectation.settingsOf) }),
 		);
-		failures.push(...missingEntries(settings, expectation.settingsContain, "settings"));
+		failures.push(...missingEntries(settings, expectation.settingsContain, "settings", secrets));
 	}
 
 	if (expectation.globalSettingsContain !== undefined) {
 		const global = await callObject(client, "getGlobalSettings");
-		failures.push(...missingEntries(global, expectation.globalSettingsContain, "global settings"));
+		failures.push(...missingEntries(global, expectation.globalSettingsContain, "global settings", secrets));
 	}
 
 	if (expectation.events !== undefined) {
@@ -399,8 +408,9 @@ function check(failures: string[], condition: boolean, message: string): void {
 	}
 }
 
-function missingEntries(actual: JsonObject, wanted: JsonObject, label: string): string[] {
+function missingEntries(actual: JsonObject, wanted: JsonObject, label: string, secrets: readonly Secret[]): string[] {
 	return Object.entries(wanted)
+		.map(([key, value]) => [redactText(key, secrets), redactJson(value, secrets)] as const)
 		.filter(([key, value]) => !isDeepStrictEqual(actual[key], value))
 		.map(([key, value]) => `${label}.${key} is ${JSON.stringify(actual[key])}, expected ${JSON.stringify(value)}`);
 }

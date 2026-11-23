@@ -106,10 +106,10 @@ function requireInspector(session: Session): Inspector {
 
 /**
  * The reply to a field change: the field and the settings after the change. The settings do
- * not show the value of a password field.
+ * not show the value of a password field, nor its value before the change.
  */
 function fieldReply(session: Session, inspector: Inspector, applied: FieldState): JsonObject {
-	const hidden: Secret[] = applied.secret === undefined ? [] : [{ value: applied.secret, label: HIDDEN_VALUE }];
+	const hidden: Secret[] = (applied.secrets ?? []).map((value) => ({ value, label: HIDDEN_VALUE }));
 	return compactJson({
 		setting: applied.setting,
 		value: applied.value,

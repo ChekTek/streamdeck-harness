@@ -66,8 +66,8 @@ export type FieldState = {
 	setting: string;
 	/** The value of the field. For a password field that has a value, this is `HIDDEN_VALUE`. */
 	value: boolean | number | string | null;
-	/** The value of a password field. Do not put it in output. */
-	secret?: string;
+	/** The values of a password field before and after the change, longest first. Do not put them in output. */
+	secrets?: string[];
 };
 
 /** A headless property inspector. Only one is open at a time. */
@@ -175,7 +175,7 @@ export class Inspector {
 				// SAFETY: SDPI elements have `value`, `disabled` and `focusElement`. lib.dom does not declare them.
 				const host = element as SdpiHost;
 				const ref = host.focusElement;
-				const inner = ref instanceof HTMLElement ? ref : (ref?.value ?? undefined);
+				const inner = ref instanceof HTMLElement ? ref : (ref?.value ?? element);
 				const secret =
 					element.localName === "sdpi-password" || (inner instanceof HTMLInputElement && inner.type === "password");
 				const value = host.value ?? null;
@@ -250,6 +250,9 @@ export class Inspector {
 					element instanceof HTMLTextAreaElement;
 				const inner = control ?? (isControl ? element : undefined);
 
+				const secret = inner instanceof HTMLInputElement && inner.type === "password";
+				const previous = secret ? inner.value : "";
+
 				if (inner instanceof HTMLInputElement && (inner.type === "checkbox" || inner.type === "radio")) {
 					inner.checked = Boolean(next);
 				} else if (
@@ -276,10 +279,13 @@ export class Inspector {
 				}
 
 				await element.updateComplete?.catch(() => undefined);
+				const toggle =
+					element instanceof HTMLInputElement && (element.type === "checkbox" || element.type === "radio");
 				return {
 					ok: true as const,
-					value: element.value ?? null,
-					secret: inner instanceof HTMLInputElement && inner.type === "password",
+					value: toggle ? element.checked : (element.value ?? null),
+					secret,
+					previous,
 				};
 			},
 			{ query: fieldQuery(setting), value: toPiFieldValue(value) },
@@ -288,7 +294,7 @@ export class Inspector {
 		if (!result.ok) {
 			throw new Error(result.error);
 		}
-		return fieldState(setting, result.value, result.secret);
+		return fieldState(setting, result.value, result.secret, result.previous);
 	}
 
 	public async snapshot(): Promise<string> {
@@ -346,10 +352,12 @@ export class Inspector {
 					return { ok: false as const, error: `"${field.name}" cannot take focus. It is hidden or disabled.` };
 				}
 				inner.setSelectionRange(clear ? 0 : inner.value.length, inner.value.length);
+				const secret = inner instanceof HTMLInputElement && inner.type === "password";
 				return {
 					ok: true as const,
 					hasValue: inner.value !== "",
-					secret: inner instanceof HTMLInputElement && inner.type === "password",
+					secret,
+					previous: secret ? inner.value : "",
 				};
 			},
 			{ query, clear: options.clear ?? true },
@@ -400,7 +408,7 @@ export class Inspector {
 			},
 			{ query, blur: options.blur ?? false },
 		);
-		return fieldState(setting, value, focused.secret);
+		return fieldState(setting, value, focused.secret, focused.previous);
 	}
 
 	/** Tells if the first element that matches `target` exists and is shown. See `#locate` for the form of `target`. */
@@ -649,12 +657,24 @@ function fieldQuery(target: string): FieldQuery {
 	return { name: target, selector: `[setting="${target}"]`, bySetting: true };
 }
 
-/** Builds the state of a field. The value of a password field goes to `secret` and not to `value`. */
-function fieldState(setting: string, value: boolean | number | string | null, secret: boolean): FieldState {
-	if (!secret || value === null || value === "") {
+/**
+ * Builds the state of a field. The value of a password field goes to `secrets` and not to
+ * `value`. `previous` is the value of the password field before the change.
+ */
+function fieldState(
+	setting: string,
+	value: boolean | number | string | null,
+	secret: boolean,
+	previous: string,
+): FieldState {
+	if (!secret) {
 		return { setting, value };
 	}
-	return { setting, value: HIDDEN_VALUE, secret: String(value) };
+	const hasValue = value !== null && value !== "";
+	const secrets = [previous, hasValue ? String(value) : ""]
+		.filter((entry) => entry !== "")
+		.sort((first, second) => second.length - first.length);
+	return { setting, value: hasValue ? HIDDEN_VALUE : value, secrets };
 }
 
 function toPiFieldValue(value: JsonValue): boolean | number | string | null {

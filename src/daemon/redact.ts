@@ -1,4 +1,4 @@
-import { isJsonObject, isJsonString, type JsonValue } from "../host/protocol.js";
+import { isJsonNumber, isJsonObject, isJsonString, type JsonValue } from "../host/protocol.js";
 
 /** A value that must not be in output, and the text that replaces it. */
 export type Secret = {
@@ -33,7 +33,10 @@ export function redactText(text: string, secrets: readonly Secret[]): string {
 	return redacted;
 }
 
-/** Returns a copy of `value` in which each secret in a string value is replaced by its label. */
+/**
+ * Returns a copy of `value` in which each secret in a string value or an object key is replaced
+ * by its label. A number that is equal to a secret becomes the label.
+ */
 export function redactJson(value: JsonValue, secrets: readonly Secret[]): JsonValue {
 	if (secrets.length === 0) {
 		return value;
@@ -41,11 +44,15 @@ export function redactJson(value: JsonValue, secrets: readonly Secret[]): JsonVa
 	if (isJsonString(value)) {
 		return redactText(value, secrets);
 	}
+	if (isJsonNumber(value)) {
+		const text = String(value);
+		return secrets.find((secret) => secret.value === text)?.label ?? value;
+	}
 	if (Array.isArray(value)) {
 		return value.map((entry) => redactJson(entry, secrets));
 	}
 	if (isJsonObject(value)) {
-		return Object.fromEntries(Object.entries(value).map(([key, entry]) => [key, redactJson(entry, secrets)]));
+		return Object.fromEntries(Object.entries(value).map(([key, entry]) => [redactText(key, secrets), redactJson(entry, secrets)]));
 	}
 	return value;
 }
